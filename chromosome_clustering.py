@@ -1,5 +1,6 @@
 import pandas as pd
-from sklearn.manifold import TSNE
+#from sklearn.manifold import TSNE
+from MulticoreTSNE import MulticoreTSNE as TSNE
 from sklearn.decomposition import PCA
 import numpy as np 
 import os
@@ -20,7 +21,7 @@ if not os.path.exists(PLOT_DIR):
 # Create the pandas file
 TABLE = pd.read_table(FILE)
 
-
+# TODO: Refactor so that we can simply use command line args.
 
 def create_sequences(table, sequence_length, stride, peak_threshold):
     """
@@ -84,8 +85,10 @@ def reduce_dimensions(sequences, red_type):
         reduced = pca.fit_transform(sequences)
     
     if red_type == "tsne":
-        tsne = TSNE()
-        reduced = tsne.fit_transform(sequences)
+        # tsne = TSNE()
+        # reduced = tsne.fit_transform(sequences)
+        tsne = TSNE(n_jobs=8)
+        reduced = tsne.fit_transform(np.array(sequences))
     
     return reduced
 
@@ -108,11 +111,19 @@ def plot_and_save(dim_red, labels, name):
     # m_0 = max(abs(np.min(np_2d, axis=0)[0]), np.max(np_2d, axis=0)[0])
     # m_1 = max(abs(np.min(np_2d, axis=0)[1]), np.max(np_2d, axis=0)[1])
         
-    # Plot all the normalized values
+    # We care more about the peak values (since there are a smaller
+    # amount of them), so we will plot those ones after the non-peak
+    # ones.
+    peaks = []
     for i in range(len(dim_red)):
         peak = labels[i] == 1
-        c = 'r' if peak else 'b'
-        plt.scatter(dim_red[i, 0], dim_red[i, 1], c=c, s=1)
+        # c = 'r' if peak else 'b'
+        if peak:
+            peaks.append(dim_red[i])
+        else:
+            plt.scatter(dim_red[i, 0], dim_red[i, 1], c='b', s=1)
+    for peak in peaks:
+        plt.scatter(peak[0], peak[1], c='r', s=1)
         
     # Save the plot
     plt.savefig(PLOT_DIR + name + ".png")
@@ -122,26 +133,34 @@ def plot_and_save(dim_red, labels, name):
 # for chromosome in table["Chromosome"].unique():
 def plot_chromosome(chromosome, sequence_length=10):
     global TABLE
-    # Filter out the single LtaP_01 chromosome file
-    c = TABLE[TABLE["Chromosome"] == chromosome].dropna()
+
+    if chromosome == "full":
+        c = TABLE.dropna()
+    else:
+        # Filter out the single chromosome file
+        c = TABLE[TABLE["Chromosome"] == chromosome].dropna()
     
     # ===== Create Sequences ===== 
     sequences, labels = create_sequences(c, sequence_length, 10, 10)
     # ===== Dimensionality Reduction =====
-    reduced = reduce_dimensions(sequences, "pca")
+    reduced = reduce_dimensions(sequences, "tsne")
 
-    plot_and_save(reduced, labels, chromosome)
-    
+    plot_and_save(reduced, labels, chromosome + "_" + str(sequence_length) + "_tsne")
+
+def multirun_wrapper(args):
+    plot_chromosome(*args)
 
 
-# import argparse
-# parser = argparse.ArgumentParser()
-# parser.add_argument("-c","--chromosome")
-# parser.add_argument("-f","--file")
-# args = parser.parse_args()
-
+SEQUENCE_LENGTHS = [5, 10, 20, 30, 40, 50]
 from multiprocessing import Pool
 if __name__ == "__main__":
-    # pool = Pool(os.cpu_count())
-    # pool.map(plot_chromosome, TABLE["Chromosome"].unique())
-    plot_chromosome("LtaP_03")
+    data = []
+    
+    chromosomes = TABLE["Chromosome"].unique()
+
+    for i in  ["LtaP_01"]:
+        for j in SEQUENCE_LENGTHS:
+            data.append((i, j))
+
+    pool = Pool(os.cpu_count())
+    pool.map(multirun_wrapper, data)
