@@ -24,21 +24,25 @@ TABLE = pd.read_table(FILE)
 def create_sequences(table):
     fold_change = [0] * (table["Position"].max() + 1)
     top_ratio = [0] * (table["Position"].max() + 1)
+    bottom_ratio = [0] * (table["Position"].max() + 1)
     for index, row in table.iterrows():
         position = row["Position"]
         fold_change[position] = row["Fold Change"]
         top_ratio[position] = row["IPD Top Ratio"]
-    return fold_change, top_ratio
+        bottom_ratio[position] = row["IPD Bottom Ratio"]
+    return fold_change, top_ratio, bottom_ratio
 
 t = TABLE[TABLE["Chromosome"] == chromosome].dropna()
-fold_sequence, top_sequence = create_sequences(t)
+fold_sequence, top_sequence, bottom_sequence = create_sequences(t)
 
 ## Find cross correlation
-#f1 = fft(fold_sequence)
-#f2 = fft(np.flipud(top_sequence))
-#cc = np.real(ifft(f1 * f2))
+# f1 = fft(fold_sequence)
+# f2 = fft(np.flipud(top_sequence))
+# cc = np.real(ifft(f1 * f2))
 
-cc = np.correlate(top_sequence, fold_sequence, "same")
+cc = np.correlate(top_sequence, fold_sequence, "full")
+
+# plt.plot(cc[len(cc)//2:])
 
 zero_index = int(len(cc)/2)
 

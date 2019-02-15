@@ -1,13 +1,12 @@
 import pandas as pd
-#from sklearn.manifold import TSNE
-from MulticoreTSNE import MulticoreTSNE as TSNE
+from sklearn.manifold import TSNE
+# from MulticoreTSNE import MulticoreTSNE as TSNE
 from sklearn.decomposition import PCA
 import numpy as np 
 import os
 import matplotlib as mpl
-mpl.use('Agg')
 import matplotlib.pyplot as plt
-plt.ioff()
+from mpl_toolkits.mplot3d import Axes3D
 
 
 # The chromosome file to parse
@@ -48,6 +47,10 @@ def create_sequences(table, sequence_length, stride, peak_threshold):
     curr = []
     curr_peaks = []
     for index, row in table.iterrows(): 
+        if index < 35000:
+            continue
+        if index > 40000:
+            continue
 
         # Add to the sequence.
         curr.append(row["IPD Top Ratio"])
@@ -81,14 +84,14 @@ def reduce_dimensions(sequences, red_type):
     reduced = []
 
     if red_type == "pca":
-        pca = PCA()
+        pca = PCA(n_components=3)
         reduced = pca.fit_transform(sequences)
     
     if red_type == "tsne":
-        # tsne = TSNE()
-        # reduced = tsne.fit_transform(sequences)
-        tsne = TSNE(n_jobs=8)
-        reduced = tsne.fit_transform(np.array(sequences))
+        tsne = TSNE(n_components=3)
+        reduced = tsne.fit_transform(sequences)
+        # tsne = TSNE(n_jobs=8, n_components=3)
+        # reduced = tsne.fit_transform(np.array(sequences))
     
     return reduced
 
@@ -115,18 +118,27 @@ def plot_and_save(dim_red, labels, name):
     # amount of them), so we will plot those ones after the non-peak
     # ones.
     peaks = []
+    fig = plt.figure(1, figsize=(4,3))
+    plt.clf()
+    ax = Axes3D(fig, rect=[0, 0, .95, 1])
+    plt.cla()
+
     for i in range(len(dim_red)):
         peak = labels[i] == 1
         # c = 'r' if peak else 'b'
         if peak:
             peaks.append(dim_red[i])
         else:
-            plt.scatter(dim_red[i, 0], dim_red[i, 1], c='b', s=1)
+            ax.scatter(dim_red[i, 0], dim_red[i, 1], dim_red[i, 2], c='b', s=1)
     for peak in peaks:
-        plt.scatter(peak[0], peak[1], c='r', s=1)
+        ax.scatter(peak[0], peak[1], peak[2], c='r', s=1)
         
     # Save the plot
-    plt.savefig(PLOT_DIR + name + ".png")
+    ax.w_xaxis.set_ticklabels([])
+    ax.w_yaxis.set_ticklabels([])
+    ax.w_zaxis.set_ticklabels([])
+
+    plt.show()
     PLOT_LOCK.release()
 
 # For each chromosome, run this:
@@ -145,7 +157,7 @@ def plot_chromosome(chromosome, sequence_length=10):
     # ===== Dimensionality Reduction =====
     reduced = reduce_dimensions(sequences, "tsne")
 
-    plot_and_save(reduced, labels, chromosome + "_" + str(sequence_length) + "_tsne")
+    plot_and_save(reduced, labels, chromosome + "_" + str(sequence_length) + "_pca")
 
 def multirun_wrapper(args):
     plot_chromosome(*args)
@@ -162,5 +174,6 @@ if __name__ == "__main__":
         for j in SEQUENCE_LENGTHS:
             data.append((i, j))
 
-    pool = Pool(os.cpu_count())
-    pool.map(multirun_wrapper, data)
+    plot_chromosome("LtaP_01")
+    # pool = Pool(os.cpu_count())
+    # pool.map(multirun_wrapper, data)
