@@ -13,7 +13,8 @@ parser.add_argument("-c", "--centers", help="The file containing center files.")
 parser.add_argument("-s", "--sequences", help="The file containing sequences")
 parser.add_argument("-o", "--outdir", help="The directory to hold output.")
 parser.add_argument("-t", "--trunc", help="Whether to truncate peak.", action="store_true")
-parser.add_argument("-r", "--rand", help="Whether to randomize negatives.", action="store_true")
+parser.add_argument("-top", "--top", help="Analyze only top", action="store_true")
+parser.add_argument("-bottom", "--bottom", help="Analyze only bottom", action="store_true")
 args = parser.parse_args()
 
 def k_means(sequences, n_clusters):
@@ -64,7 +65,7 @@ def init(l, s, c, o):
 # ========== Main ==========
 if __name__ == "__main__":
     # Prepare necessary resources.
-    s = pd.read_csv(args.sequences, header=None)
+    s = pd.read_csv(args.sequences)
     if args.trunc:
         mr = len(s.iloc[0]) // 2
         s.iloc[:, mr].values[:] = 0
@@ -72,17 +73,20 @@ if __name__ == "__main__":
     l = Lock()
     o = args.outdir
     o += "kmeans_trunc" if args.trunc else "kmeans"
-    if args.rand:
-        o += "_r"
+    if args.top:
+        o += "_top"
+        strand = c["IPD Top Ratio"] > c["IPD Bottom Ratio"]
+    elif args.bottom:
+        o += "_bottom"
+        strand = c["IPD Top Ratio"] < c["IPD Bottom Ratio"]
+    else:
+        strand = c["IPD Top Ratio"] == c["IPD Top Ratio"] #always true
     o += ".csv"
 
     # Create 50-50 distribution of fp and tp
-    n_pos = c[c["Fold Change"] > 10].shape[0]
-    if args.rand:
-        neg = c[c["Fold Change"] <= 10].sample(n=n_pos, random_state=0)
-    else:
-        neg = c[c["Fold Change"] <= 10].nlargest(n_pos, "Max IPD")
-    to_drop = c.isin(pd.concat([neg, c[c["Fold Change"] > 10]])).iloc[:,0]
+    n_pos = c[(c["Fold Change"] > 10) & strand].shape[0]
+    neg = c[(c["Fold Change"] <= 10) & strand].sample(n=n_pos, random_state=0)
+    to_drop = c.isin(pd.concat([neg, c[(c["Fold Change"] > 10) & strand]])).iloc[:,0]
     c = c[to_drop]
     s = s[to_drop]
     print(n_pos)
@@ -99,7 +103,7 @@ if __name__ == "__main__":
     params = []
     for r in [100, 50, 25, 20, 15, 10, 5]:
         # Different radii
-        for n_c in [i for i in range(2, 13)]:
+        for n_c in [i for i in range(2, 21)]:
             # Different cluster sizes
             params.append((r,n_c))
 

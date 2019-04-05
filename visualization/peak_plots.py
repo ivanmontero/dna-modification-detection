@@ -51,7 +51,7 @@ def plot(table, title, name):
 
     plt.suptitle(title)
     plt.legend()
-    plt.savefig(PLOT_DIR + name + ".png", dpi=1600)
+    plt.savefig(PLOT_DIR + name + ".png", dpi=600)
     plt.cla()
     plt.close()
 
@@ -95,5 +95,7 @@ for i in range(J_WINDOWS):
            "Top" if center["IPD Top Ratio"] > center["IPD Bottom Ratio"] else "Bottom", \
            center["Position"], \
            center["Base"])
+    if i % 100 == 0:
+        print(i)
     plot(windows[i], title, name)
 

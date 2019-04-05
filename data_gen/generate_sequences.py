@@ -5,6 +5,8 @@ from argparse import ArgumentParser
 parser = ArgumentParser()
 parser.add_argument("-f", "--file", help="The file containing genome data.")
 parser.add_argument("-o", "--outdir", help="The directory to hold output.")
+parser.add_argument("-b", "--bases", help="Output base sequences.", action="store_true")
+parser.add_argument("-nc", "--no_centers", help="Don't output centers.", action="store_true")
 args = parser.parse_args()
 
 # The chromosome file to parse
@@ -19,7 +21,7 @@ if args.outdir:
 if not os.path.exists(DIR):
     os.makedirs(DIR)
 
-SEQUENCES_FILE = "sequences_r_100.csv"
+SEQUENCES_FILE = "sequences_r_100.csv" if not args.bases else "bases_r_100.csv"
 CENTERS_FILE = "centers_r_100.csv"
 
 # Create the pandas file
@@ -43,7 +45,8 @@ def save(sequences, centers, window_radius):
     for s in sequences:
         f.write(",".join(map(str, s)) + "\n")
     f.close()
-    centers.to_csv(DIR + CENTERS_FILE, index=False)
+    if not args.no_centers:
+        centers.to_csv(DIR + CENTERS_FILE, index=False)
 
 print("apply")
 DATA["Max IPD"] = pd.concat(
@@ -63,13 +66,15 @@ print("creating peaks")
 print(peaks.shape[0])
 for i in range(peaks.shape[0]):
     row = peaks.iloc[i]
-    ipd_selected = \
-        "IPD Top Ratio" \
+    selected = \
+        ("IPD Top Ratio" \
         if row["IPD Top Ratio"] > row["IPD Bottom Ratio"] else \
-        "IPD Bottom Ratio"
+        "IPD Bottom Ratio") if not args.bases else \
+            "Base"
     window = get_window(row, RADIUS)
     if window is not None:
-        sequences.append(window[ipd_selected].tolist())
+        sequences.append(window[selected].tolist())
+        print(window[selected].tolist())
         centers = centers.append(row, ignore_index=True)
         if len(sequences) % CHECKPOINT == 0:
             print(len(sequences))

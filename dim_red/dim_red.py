@@ -2,7 +2,7 @@ import pandas as pd
 from sklearn.cluster import KMeans
 from multiprocessing import Pool, Lock
 from sklearn.manifold import TSNE
-from sklearn.decomposition import PCA
+from sklearn.decomposition import PCA, KernelPCA
 import numpy as np 
 import os
 import matplotlib as mpl
@@ -22,6 +22,10 @@ def dim_red(sequences, red_type):
     reduced = []
     if red_type == "pca":
         pca = PCA()
+        reduced = pca.fit_transform(sequences)
+    
+    if red_type == "kernel_pca":
+        pca = KernelPCA(kernel="rbf")
         reduced = pca.fit_transform(sequences)
     
     if red_type == "tsne":
@@ -71,7 +75,7 @@ def init(l, s, c, o):
 # ========== Main ==========
 if __name__ == "__main__":
     # Prepare necessary resources.
-    s = pd.read_csv(args.sequences, header=None)
+    s = pd.read_csv(args.sequences)
     if args.trunc:
         mr = len(s.iloc[0]) // 2
         s.iloc[:, mr].values[:] = 0
@@ -79,16 +83,24 @@ if __name__ == "__main__":
     l = Lock()
     o = args.outdir
 
-    # Create 50-50 distribution of fp and tp
-    # n_pos = c[c["Fold Change"] > 10].shape[0]
-    # if args.rand:
-    #     neg = c[c["Fold Change"] <= 10].sample(n=n_pos, random_state=0)
+    to_keep = s.isin(s.dropna()).iloc[:,0]
+    s = s[to_keep]
+    c = c[to_keep]
+
+    # if args.top:
+    #     strand = c["IPD Top Ratio"] > c["IPD Bottom Ratio"]
+    # elif args.bottom:
+    #     strand = c["IPD Top Ratio"] < c["IPD Bottom Ratio"]
     # else:
-    #     neg = c[c["Fold Change"] <= 10].nlargest(n_pos, "Max IPD")
-    # to_drop = c.isin(pd.concat([neg, c[c["Fold Change"] > 10]])).iloc[:,0]
-    # c = c[to_drop]
-    # s = s[to_drop]
-    # print(n_pos)
+    #     strand = c["IPD Top Ratio"] == c["IPD Top Ratio"] #always true
+
+    # Create 50-50 distribution of fp and tp
+    n_pos = c[(c["Fold Change"] > 10)].shape[0]
+    neg = c[(c["Fold Change"] <= 10)].sample(n=n_pos, random_state=0)
+    to_drop = c.isin(pd.concat([neg, c[(c["Fold Change"] > 10)]])).iloc[:,0]
+    c = c[to_drop]
+    s = s[to_drop]
+    print(n_pos)
 
 
     # Prepare outputs.
@@ -97,9 +109,9 @@ if __name__ == "__main__":
 
     # Prepare job parameters.
     params = []
-    for r in [100, 50, 25, 20, 15, 10, 5]:
+    for r in [1000]:
         # Different radii
-        for t in ["pca", "tsne"]:
+        for t in ["kernel_pca", "tsne", "pca"]:
             # Different cluster sizes
             params.append((r,t))
 

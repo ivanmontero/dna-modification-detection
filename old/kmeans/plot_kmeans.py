@@ -1,11 +1,18 @@
+import os
 import pandas as pd
 import matplotlib as mpl
 # mpl.use('Agg')
 import matplotlib.pyplot as plt
 # plt.ioff()
 
-DIR = "trunc_r/"
-FILE = "kmeans_trunc_r.csv"
+from argparse import ArgumentParser
+parser = ArgumentParser()
+parser.add_argument("-f", "--file", help="The file containing kmeans data.")
+parser.add_argument("-o", "--outdir", help="The directory to hold output.")
+args = parser.parse_args()
+
+if not os.path.exists(args.outdir):
+    os.makedirs(args.outdir)
 
 # Accuracy is defined as follows:
 #   acc = # correct classifications / total
@@ -42,7 +49,7 @@ def dist(tab, n_clusters):
     return sum_dist / n_clusters
 
 
-kmeans = pd.read_csv(FILE)
+kmeans = pd.read_csv(args.file)
 
 acc_map = {}
 for radius in kmeans["radius"].unique():
@@ -59,12 +66,12 @@ print(acc_map)
 
 for radius in kmeans["radius"].unique():
     curr = kmeans[(kmeans["radius"] == radius)]
-    plt.plot(curr["n_clusters"], [acc_map[radius][i]["acc"] for i in curr["n_clusters"]])
+    plt.plot(curr["n_clusters"], [acc_map[radius][i]["acc"] for i in curr["n_clusters"]], label=f"r={radius}")
     plt.xlabel("# Of Clusters")
     plt.ylabel("Accuracy")
     plt.title("Sequence Radius " + str(radius))
-    plt.savefig(DIR + "r%d_acc.png" % (radius,), dpi=400)
-    plt.show()
+plt.savefig(args.outdir + "kmeans_acc.png", dpi=600)
+plt.show()
 
 # for radius in kmeans["radius"].unique():
 #     curr = kmeans[(kmeans["radius"] == radius)]
@@ -74,23 +81,23 @@ for radius in kmeans["radius"].unique():
 #     plt.title("Sequence Radius " + str(radius))
 #     plt.show()
 
-maxima = [[5, 8], [10, 9], [15, 9], [20, 9], [25, 9], [50,9], [100, 12]]
+# maxima = [[5, 8], [10, 9], [15, 9], [20, 9], [25, 9], [50,9], [100, 12]]
 
-for m in maxima:
-    p = kmeans[(kmeans["radius"] == m[0]) & (kmeans["n_clusters"] == m[1])]
+# for m in maxima:
+#     p = kmeans[(kmeans["radius"] == m[0]) & (kmeans["n_clusters"] == m[1])]
 
-    plt.subplot(2, 1, 1)
-    plt.bar(p["cluster_id"], p["tp"] / p["total"])
-    plt.title("Sequence Radius " + str(m[0]) + ", " + str(m[1]) + " Clusters")
+#     plt.subplot(2, 1, 1)
+#     plt.bar(p["cluster_id"], p["tp"] / p["total"])
+#     plt.title("Sequence Radius " + str(m[0]) + ", " + str(m[1]) + " Clusters")
 
-    plt.subplot(2, 1, 2)
+#     plt.subplot(2, 1, 2)
 
-    plt.bar(p["cluster_id"], p["total"])
+#     plt.bar(p["cluster_id"], p["total"])
 
-    # plt.savefig("r%d_c%d_kmeans.png" % (m[0], m[1]), dpi=400)
-    plt.show()
-    plt.cla()
-    plt.close("all")
+#     # plt.savefig("r%d_c%d_kmeans.png" % (m[0], m[1]), dpi=400)
+#     plt.show()
+#     plt.cla()
+#     plt.close("all")
 
 
 # plt.bar(, [])

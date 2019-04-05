@@ -1,8 +1,5 @@
-# TODO: Refactor to use sequences
 
 import pandas as pd
-from sklearn.manifold import TSNE
-from sklearn.decomposition import PCA
 import numpy as np 
 import os
 import matplotlib as mpl
@@ -11,156 +8,96 @@ import matplotlib.pyplot as plt
 plt.ioff()
 from argparse import ArgumentParser
 parser = ArgumentParser()
-parser.add_argument("-f", "--file", help="The file containing genome data.")
+parser.add_argument("-c", "--centers", help="The file containing center files.")
+parser.add_argument("-s", "--sequences", help="The file containing sequences")
 parser.add_argument("-o", "--outdir", help="The directory to hold output.")
 args = parser.parse_args()
 
-# The chromosome file to parse
-FILE = "l_tarentolae.tsv"
-if args.file:
-    FILE = args.file
+sequences = pd.read_csv(args.sequences)
+centers = pd.read_csv(args.centers)
+if not os.path.exists(args.outdir):
+    os.makedirs(args.outdir)
 
-# The directory to store plots
-PLOT_DIR = "averaging/"
-if args.outdir:
-    PLOT_DIR = args.outdir
-if not os.path.exists(PLOT_DIR):
-    os.makedirs(PLOT_DIR)
+tp_top = centers[(centers["Fold Change"] > 10) &
+                 (centers["IPD Top Ratio"] > centers["IPD Bottom Ratio"])]
 
-# Create the pandas file
-DATA = pd.read_table(FILE).dropna()
+tp_bottom = centers[(centers["Fold Change"] > 10) &
+                    (centers["IPD Top Ratio"] < centers["IPD Bottom Ratio"])]
 
-def plot_and_save(avg, name, title):
-    """
-    Plots and saves the sequences with reduced dimensions.
+fp_top = centers[(centers["Fold Change"] <= 10) &
+                 (centers["IPD Top Ratio"] > centers["IPD Bottom Ratio"])]
 
-    Args:
-        dim_red: The sequences, after dimensionality reduction.
-        name: The name of the graph
-    """
-    print("plot_s " + name)
+fp_bottom = centers[(centers["Fold Change"] <= 10) &
+                    (centers["IPD Top Ratio"] < centers["IPD Bottom Ratio"])]
 
-    # Plot lock, if we are plotting in a parallel manner.
-    lock.acquire()
-    # colors = is_peak.map(lambda x: 'r' if x else 'b')
-    plt.plot([i - int(len(avg)/2) for i in range(int(len(avg)))],
-              avg)
-    # plt.scatter(dim_red[:,0], dim_red[:,1], c=colors, s=1)
-    plt.suptitle(title)
-    # Save the plot
-    plt.savefig(PLOT_DIR + name + ".png", dpi=1600)
+def plot(c, title, name, r=100):
+    to_drop = centers.isin(c).iloc[:,0]
+    s = sequences[to_drop]
+    avg = s.sum(axis=0) / s.shape[0]
+    # avg.plot()
+    avg = avg.iloc[100-r:100+r+1]
+    # print(avg)
+    plt.plot([i-r for i in range(2*r+1)], avg)
+    plt.title(title)
+    # plt.show()
+    plt.savefig(args.outdir + name + ".png", dpi=400)
     plt.cla()
     plt.close("all")
-    lock.release()
 
-# f (Filter):
-#   0 - None
-#   1 - True Positives
-#   2 - False Positives
-def plot_chromosome(data, peaks=1000, base=None, f=0, sequence_radius=10):
-    print("plot_chromosome")
-    
-    if f == 1:
-        data = data[data["Max IPD"] > 10]
-    elif f == 2:
-        data = data[data["Max IPD"] <= 10]
+# c1 - c2
+def plot_diff(c1, c2, title, name, r=100):
+    to_drop = centers.isin(c1).iloc[:,0]
+    s1 = sequences[to_drop]
+    avg1 = s1.sum(axis=0) / s1.shape[0]
 
-    # ===== Create Sequences ===== 
-    sequences, positives = get_peaks(data, peaks, sequence_radius, base)
+    to_drop = centers.isin(c2).iloc[:,0]
+    s2 = sequences[to_drop]
+    avg2 = s2.sum(axis=0) / s2.shape[0]
 
-    # ===== Dimensionality Reduction =====
-    # reduced = reduce_dimensions(sequences, dim_red_type)
-    avg = [0.0] * (sequence_radius*2 + 1)
-    index = 0
-    for sequence in sequences:
-        for i in range(sequence_radius*2 + 1):
-            avg[i] += sequence.iloc[i]
-        if (index+1) % (peaks//10) == 0:
-            avg_i = map(lambda x: x / (index+1), avg)
-            name = \
-                "%d_%s_%s" \
-                % (index+1, \
-                "all" if base is None else base, \
-                "all" if f == 0 else \
-                ("tp" if f == 1 else
-                "fp"))
-            title = \
-                "Peaks: %s, Base: %s, %s" \
-                % (index+1, \
-                "All" if base is None else base, \
-                "All Peaks" if f == 0 else \
-                ("True Positives" if f == 1 else \
-                "False Positives"))
-            plot_and_save(avg_i, name, title)
-        index += 1
+    avg = avg1 - avg2
+    # print(avg)
 
-def get_window(center, window_radius, table):
-    window = table[(table["Chromosome"] == center["Chromosome"])
-                   & (table["Position"] >= center["Position"] - window_radius)
-                   & (table["Position"] <= center["Position"] + window_radius)]
-    return window if len(window) == (2*window_radius+1) else None
+    # avg.dropna()
 
-# get_peaks(data, peaks, sequence_radius, base)
-def get_peaks(data, num_windows, window_radius, base):
-    print("get_peaks")
-    positives = data.sort_values(by=["Max IPD"], ascending=False)
-    if base is not None:
-        positives = positives[positives["Base"] == base]
-    j_windows = []
-    j_window_index = 0
-    while len(j_windows) < num_windows:
-        center = positives.iloc[j_window_index]
-        ipd_selected = \
-              "IPD Top Ratio" \
-              if center["IPD Top Ratio"] > center["IPD Bottom Ratio"] else \
-              "IPD Bottom Ratio"
-        window = get_window(center, window_radius, data)
-        if window is not None:
-            j_windows.append(window[ipd_selected])
-            j_window_index += 1
-        else:
-            positives.drop(positives.index[j_window_index], inplace=True)
-    return j_windows, positives.iloc[:num_windows]
+    # print(avg)
 
-def wrapper(args):
-    plot_chromosome(*args)
+    # avg.plot()
+    avg = avg.iloc[100-r:100+r+1]
+    plt.plot([i-r for i in range(2*r+1)], avg)
+    plt.title(title)
+    # plt.show()
+    plt.savefig(args.outdir + name + ".png", dpi=400)
+    plt.cla()
+    plt.close("all")
 
-def init(l):
-    global lock 
-    lock = l
+plot(tp_top, "True Positive Top Ratio", "tp_top")
+plot(tp_bottom, "True Positive Bottom Ratio", "tp_bottom")
+plot(fp_top, "False Positive Top Ratio", "fp_top")
+plot(fp_bottom, "False Positive Bottom Ratio", "fp_bottom")
 
-print("apply")
-# data["Max IPD"] = data.apply(
-#     lambda row: max(row["IPD Top Ratio"], row["IPD Bottom Ratio"]), axis=1)
-# data["Max IPD"] = np.max(row["IPD Top Ratio"], row["IPD Bottom Ratio"])
-DATA["Max IPD"] = pd.concat(
-    [DATA["IPD Top Ratio"], DATA["IPD Bottom Ratio"]], axis=1).max(axis=1)
+plot_diff(tp_top, fp_top, "TP - FP, Top Ratio", "tp_minus_fp_top")
+plot_diff(tp_bottom, fp_bottom, "TP - FP, Bottom Ratio", "tp_minus_fp_bottom")
 
+plot(tp_top, "True Positive Top Ratio", "tp_top_r15", r=15)
+plot(tp_bottom, "True Positive Bottom Ratio", "tp_bottom_r15", r=15)
+plot(fp_top, "False Positive Top Ratio", "fp_top_r15", r=15)
+plot(fp_bottom, "False Positive Bottom Ratio", "fp_bottom_r15", r=15)
 
-# PEAKS = [100, 200, 300, 400, 500, 750, 1000]
-BASES = [None, "T", "A", "C", "G"]
-FILTERS = [0, 1, 2]
-RADIUS = 200
-from multiprocessing import Pool, Lock
-if __name__ == "__main__":
-    data_in = []
-    # for p in PEAKS:
-    for b in BASES:
-        for f in FILTERS:
-            data_in.append((DATA, 1000, b, f, RADIUS))
-    print(data_in)
-    pl = Lock()
-    pool = Pool(os.cpu_count(), initializer=init, initargs=(pl,))
-    pool.map(wrapper, data_in)
-    pool.close()
-    pool.join()
-# for f in FILTERS:
-#     wrapper((DATA, p, None, f, RADIUS))
+plot_diff(tp_top, fp_top, "TP - FP, Top Ratio", "tp_minus_fp_top_r15", r=15)
+plot_diff(tp_bottom, fp_bottom, "TP - FP, Bottom Ratio", "tp_minus_fp_bottom_r15", r=15)
 
-# for f in FILTERS:
-#     print("filter: " + str(f))
-#     plot_chromosome(DATA, f=f)
+# # Create 50-50 distribution of fp and tp
+# n_pos = c[c["Fold Change"] > 10].shape[0]
+# if args.rand:
+#     neg = c[c["Fold Change"] <= 10].sample(n=n_pos, random_state=0)
+# else:
+#     neg = c[c["Fold Change"] <= 10].nlargest(n_pos, "Max IPD")
+# to_drop = c.isin(pd.concat([neg, c[c["Fold Change"] > 10]])).iloc[:,0]
+# c = c[to_drop]
+# s = s[to_drop]
+# print(n_pos)
 
-# wrapper((DATA, 20, None, 0, 25))
-
-# wrapper((20, "pca", 50))
+# avg.plot()
+# plt.show()
+# print(avg)
+# plt.plot(avg.values)

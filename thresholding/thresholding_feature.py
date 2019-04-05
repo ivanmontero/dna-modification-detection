@@ -4,7 +4,7 @@ import pandas as pd
 import numpy as np 
 import os
 import matplotlib.pyplot as plt
-from multiprocessing import Pool
+from multiprocessing import Pool, Lock
 from argparse import ArgumentParser
 parser = ArgumentParser()
 parser.add_argument("-f", "--file", help="The file containing genome data.")
@@ -14,14 +14,21 @@ args = parser.parse_args()
 
 
 def dist(features, begin, end, step):
+    print("%f-%f" % (begin, end))
     t = begin
+    data = ""
     while t < end:
         res = features[features["Feature"] > t]
         res_total = res.shape[0]
         res_tp = res["True Positive"].sum()
         res_fp = res_total - res_tp
-        print("%f,%d,%d,%d" % (t, res_total, res_tp, res_fp))
+        data += "%f,%d,%d,%d\n" % (t, res_total, res_tp, res_fp)
         t += step
+    lock.acquire()
+    f = open(args.outfile, "a")
+    f.write(data)
+    f.close()
+    lock.release()
 
 
 if args.generate:
@@ -50,19 +57,34 @@ if args.generate:
 def wrapper(args):
     dist(*args)
 
+def init(l):
+    global lock
+    lock = l
+
 if __name__ == '__main__' and not args.generate:
     FILE = "features.tsv"
     if args.file:
         FILE = args.file
 
-    print("Threshold,Total,True Positives,False Positives")
+    f = open(args.outfile, "w+")
+    f.write("Threshold,Total,True Positives,False Positives\n")
+    f.close()
 
     step = .01
     features = pd.read_csv(FILE)
+    print(features.describe())
 
     params = []
-    for i in range(30):
+    for i in range(180):
         params.append((features,float(i),float(i+1),0.01))
 
-    pool = Pool(os.cpu_count())
+    l = Lock()
+
+    pool = Pool(os.cpu_count(), initializer=init, initargs=(l,))
     pool.map(wrapper, params)
+
+    # Sort
+    print("sorting")
+    result = pd.read_csv(args.outfile)
+    result = result.sort_values(by=["Threshold"])
+    result.to_csv(args.outfile, index=False)
