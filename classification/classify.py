@@ -23,6 +23,10 @@ from sklearn.neural_network import MLPClassifier
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.svm import SVC
 
+# Keras
+from keras.models import Sequential
+from keras.layers import Dense, Dropout
+
 # Commandline arguments.
 from argparse import ArgumentParser
 
@@ -68,19 +72,34 @@ args = parser.parse_args()
 
 # ========== Classification Methods ==========
 def knn(X_train, y_train, X_test, params):
-    return KNeighborsClassifier(int(params[0])).fit(X_train, y_train).predict_proba(X_test)
+    return KNeighborsClassifier(int(params[0])).fit(X_train, y_train).predict_proba(X_test)[:,1]
 
 def log_reg(X_train, y_train, X_test, params):
-    return LogisticRegression(max_iter=int(params[0])).fit(X_train, y_train).predict_proba(X_test)
+    return LogisticRegression(max_iter=int(params[0])).fit(X_train, y_train).predict_proba(X_test)[:,1]
 
 def svc(X_train, y_train, X_test, params):
-    return SVC(kernel=params[0], probability=True).fit(X_train, y_train).predict_proba(X_test)
+    return SVC(kernel=params[0], probability=True).fit(X_train, y_train).predict_proba(X_test)[:,1]
 
 def mlpc(X_train, y_train, X_test, params):
-    return MLPClassifier(tuple([int(i) for i in params[0].split(",")]), max_iter=int(params[1])).fit(X_train, y_train).predict_proba(X_test)
+    return MLPClassifier(tuple([int(float(i)*len(X_train[0])) for i in params[0].split(",")]), max_iter=int(params[1])).fit(X_train, y_train).predict_proba(X_test)[:,1]
 
 def rfc(X_train, y_train, X_test, params):
     return RandomForestClassifier(n_estimators=int(params[0]), n_jobs=-1).fit(X_train, y_train).predict_proba(X_test)
+
+def keras_model(X_train, y_train, X_test, params):
+    # layer sizes
+    sizes = [int(float(i)*len(X_train[0])) for i in params[0].split(",")]
+    model = Sequential()
+    model.add(Dense(sizes[0], activation="relu", input_shape=(len(X_train[0]),)))
+    model.add(Dropout(float(params[1])))
+    for i in range(1, len(sizes)):
+        model.add(Dense(sizes[i], activation="relu"))
+        model.add(Dropout(float(params[1])))
+    model.add(Dense(1, activation="sigmoid"))
+    model.compile(optimizer="adam", loss="binary_crossentropy")
+    model.fit(X_train, y_train, epochs=int(params[2]))
+
+    return np.squeeze(model.predict(X_test))
 
 def get_classfication_name(method):
     if method == "knn":
@@ -91,6 +110,8 @@ def get_classfication_name(method):
         return "Support Vector"
     elif method == "mlpc":
         return "Multi-Layer Perception"
+    elif method == "keras_model":
+        return "Keras Model"
     else:
         return "Unknown"
 
@@ -143,7 +164,7 @@ def plot_roc(fpr, tpr, auc, label, title, name):
     if args.interactive:
         plt.show()
     else:
-        plt.savefig(outdir + name, dpi=600)
+        plt.savefig(outdir + name + ".png", dpi=600)
     plt.close("all")
     plt.cla()
 
@@ -204,7 +225,7 @@ def run(index):
 
         y_scores = globals()[args.method](X_train, y_train, X_test, params[index])
 
-        fpr, tpr, threshold = roc_curve(y_test, y_scores[:,1])
+        fpr, tpr, threshold = roc_curve(y_test, y_scores)
         roc_auc = auc(fpr, tpr)
 
         fprs.append(fpr)
