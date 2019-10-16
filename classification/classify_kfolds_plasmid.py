@@ -170,7 +170,7 @@ FEATURES = [
             # "Bottom Trimmed Error",
             # "Bottom Trimmed Mean",
             # "Top Coverage",
-            "Top IPD Ratio",
+            "ipdRatio",
             # "Top Null Prediction",
             # "Top Score",
             # "Top Trimmed Error",
@@ -181,8 +181,9 @@ def prepare_input(sequences):
     ss = []
     for s in sequences:
         if s in FEATURES:
-            ss.append(scale(sequences[s]))
-    ss.append(pd.get_dummies(pd.DataFrame(sequences["Base"])).values)
+            f_seq = sequences[s]
+            ss.append((f_seq - np.mean(f_seq))/np.std(f_seq))
+    ss.append(pd.get_dummies(pd.DataFrame(sequences["base"])).values)
     data = np.concatenate(ss, axis=1)
     return data
 
@@ -258,7 +259,7 @@ def run(index):
     radius = args.radius
     # c, f = resize_and_verify(centers, topsequences, bottomsequences, bases, radius)     
     s = prepare_input(sequences)
-    y = c["Fold Change"].map(lambda x: 1 if x > 10 else 0).values
+    y = c["J"].values
 
     fprs = []
     tprs = []

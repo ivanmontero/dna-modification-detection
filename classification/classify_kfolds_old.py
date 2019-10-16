@@ -14,6 +14,7 @@ from sklearn.metrics import accuracy_score
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import roc_curve
 from sklearn.metrics import auc
+from scipy import interp
 from sklearn.metrics import accuracy_score
 from sklearn.preprocessing import scale
 from sklearn.preprocessing import OneHotEncoder
@@ -21,11 +22,19 @@ from sklearn.neighbors import KNeighborsClassifier
 from sklearn.linear_model import LogisticRegression, RidgeClassifier
 from sklearn.neural_network import MLPClassifier
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import StratifiedKFold
 from sklearn.svm import SVC
+import matplotlib as mpl
+mpl.use('Agg')
+import matplotlib.pyplot as plt
+plt.ioff()
 
 # Keras
 from keras.models import Sequential
 from keras.layers import Dense, Dropout
+
+# XGBoost
+import xgboost as xgb
 
 # Commandline arguments.
 from argparse import ArgumentParser
@@ -67,29 +76,31 @@ parser.add_argument("-bottom", "--bottom", action="store_true",
                     help="Analyze only bottom")
 parser.add_argument("-e", "--even", action="store_true",
                     help="Use a 50-50 distribution of true and false examples.")
-
+parser.add_argument("-f", "--folds", default=5, type=int,
+                    help="Number of folds to use for cross validation.")
 args = parser.parse_args()
 
 # ========== Classification Methods ==========
 def knn(X_train, y_train, X_test, params):
     return KNeighborsClassifier(int(params[0])).fit(X_train, y_train).predict_proba(X_test)[:,1]
 
-def log_reg(X_train, y_train, X_test, y_test, params):
+def log_reg(X_train, y_train, X_test, params):
     return LogisticRegression(max_iter=int(params[0])).fit(X_train, y_train).predict_proba(X_test)[:,1]
 
-def ridge(X_train, y_train, X_test, y_test, params):
-    return RidgeClassifier(alpha=int(params[0])).fit(X_train, y_train).predict_proba(X_test)[:,1]
+def ridge(X_train, y_train, X_test, params):
+    return RidgeClassifier(alpha=float(params[0])).fit(X_train, y_train).predict_proba(X_test)[:,1]
 
-def svc(X_train, y_train, X_test, y_test, params):
+def svc(X_train, y_train, X_test, params):
     return SVC(kernel=params[0], probability=True).fit(X_train, y_train).predict_proba(X_test)[:,1]
 
-def mlpc(X_train, y_train, X_test, y_test, params):
+# Input relative
+def mlpc(X_train, y_train, X_test, params):
     return MLPClassifier(tuple([int(float(i)*len(X_train[0])) for i in params[0].split(",")]), max_iter=int(params[1])).fit(X_train, y_train).predict_proba(X_test)[:,1]
 
-def rfc(X_train, y_train, X_test, y_test, params):
-    return RandomForestClassifier(n_estimators=int(params[0]), n_jobs=-1).fit(X_train, y_train).predict_proba(X_test)
+def rfc(X_train, y_train, X_test, params):
+    return RandomForestClassifier(n_estimators=int(params[0]), n_jobs=-1).fit(X_train, y_train).predict_proba(X_test)[:,1]
 
-def keras_model(X_train, y_train, X_test, y_test, params):
+def keras_model(X_train, y_train, X_test, params):
     # layer sizes
     sizes = [int(float(i)*len(X_train[0])) for i in params[0].split(",")]
     model = Sequential()
@@ -100,24 +111,20 @@ def keras_model(X_train, y_train, X_test, y_test, params):
         model.add(Dropout(float(params[1])))
     model.add(Dense(1, activation="sigmoid"))
     model.compile(optimizer="adam", loss="binary_crossentropy")
-    history = model.fit(X_train, y_train, epochs=int(params[2]), validation_data=(X_test,y_test))
-    
-    if args.interactive:
-        import matplotlib.pyplot as plt
-    else:
-        import matplotlib as mpl
-        mpl.use('Agg')
-        import matplotlib.pyplot as plt
-        plt.ioff()
-    plt.plot(history.history['loss'], label='loss')
-    plt.plot(history.history['val_loss'], label='val_loss')
-    plt.ylabel('loss')
-    plt.xlabel('epoch')
-    plt.legend()
-    plt.savefig(outdir + f"{args.method}_{'_'.join(params)}_epochs.png", dpi=600)
-    plt.close("all")
-    plt.cla()
+    model.fit(X_train, y_train, epochs=int(params[2]))
     return np.squeeze(model.predict(X_test))
+
+def boosting(X_train, y_train, X_test, params):
+    # dtrain = xgb.DMatrix(np.array(X_train), label=np.array(y_train))
+    # bparams = {
+    #     "verbosity": 2,
+    #     # "num_parallel_tree": 2
+    #     "max_depth": int(params[1])
+    # }
+    # bst = xgb.train(bparams, dtrain, int(params[0]))
+    # dtest = xgb.DMatrix(np.array(X_test))
+    # return np.squeeze(bst.predict(dtest, ntree_limit=bst.best_ntree_limit))
+    return xgb.XGBClassifier(max_depth=10, n_estimators=int(params[0]), n_jobs=-1,).fit(X_train, y_train).predict_proba(X_test)[:,1]
 
 def get_classfication_name(method):
     if method == "knn":
@@ -128,8 +135,12 @@ def get_classfication_name(method):
         return "Support Vector"
     elif method == "mlpc":
         return "Multi-Layer Perception"
+    elif method == "rfc":
+        return "Random Forest"
     elif method == "keras_model":
         return "Keras Model"
+    elif method == "boosting":
+        return "XGBoost Random Forest"
     elif method == "ridge":
         return "Ridge Classifier"
     else:
@@ -232,33 +243,62 @@ def get_resources():
 
 def run(index):
     print(f"[START] {params[index]}")
-    fprs = []
-    tprs = []
-    aucs = []
-    labels = []
 
     for radius in radii:
         c, ts, bs, b = resize_and_verify(centers, topsequences, bottomsequences, bases, radius)     
         s =  prepare_input(ts, bs, b)
         y = c["Fold Change"].map(lambda x: 1 if x > 10 else 0).values
-        X_train, X_test, y_train, y_test = train_test_split(s, y, test_size=0.2)
 
-        y_scores = globals()[args.method](X_train, y_train, X_test, y_test, params[index])
+        fprs = []
+        tprs = []
+        aucs = []
+        labels = []
 
-        fpr, tpr, threshold = roc_curve(y_test, y_scores)
-        roc_auc = auc(fpr, tpr)
+        cv = StratifiedKFold(n_splits=args.folds, random_state=0)
 
-        fprs.append(fpr)
-        tprs.append(tpr)
-        aucs.append(roc_auc)
-        labels.append(f"r={radius}")
+        i = 0
+        mean_fpr = np.linspace(0, 1, 100)
+        for train, test in cv.split(s, y):
+            y_scores = globals()[args.method](s[train], y[train], s[test], params[index])
+            fpr, tpr, thresholds = roc_curve(y[test], y_scores)
+            tprs.append(interp(mean_fpr, fpr, tpr))
+            tprs[-1][0] = 0.0
+            roc_auc = auc(fpr, tpr)
+            aucs.append(roc_auc)
+            plt.plot(fpr, tpr, lw=1, alpha=0.3, label=f"ROC fold {i} (AUC={roc_auc:.2f})")
+            i += 1
+        plt.plot([0, 1], [0, 1], linestyle='--', lw=2, color='r', alpha=.8)
 
-    title = f"{get_classfication_name(args.method)} ROC Plot"
-    if params:
-        title += f". Params: {', '.join(params[index])}"
-    name = f"{args.method}_{'_'.join(params[index])}"
+        mean_tpr = np.mean(tprs, axis=0)
+        mean_tpr[-1] = 1.0
+        mean_auc = auc(mean_fpr, mean_tpr)
+        std_auc = np.std(aucs)
+        plt.plot(mean_fpr, mean_tpr, color='b',
+                label='Mean ROC (AUC = %0.2f $\pm$ %0.2f)' % (mean_auc, std_auc),
+                lw=2, alpha=.8)
 
-    plot_roc(fprs, tprs, aucs, labels, title, name)
+        std_tpr = np.std(tprs, axis=0)
+        tprs_upper = np.minimum(mean_tpr + std_tpr, 1)
+        tprs_lower = np.maximum(mean_tpr - std_tpr, 0)
+        plt.fill_between(mean_fpr, tprs_lower, tprs_upper, color='grey', alpha=.2,
+                        label='$\pm$ 1 std. dev.')
+
+        plt.xlim([0, 1])
+        plt.ylim([0, 1])
+        plt.xlabel('False Positive Rate')
+        plt.ylabel('True Positive Rate')
+        
+        plt.title("Classification ROC Plot: 75% Dropout, 25 Epochs")
+        # plt.title(f"{get_classfication_name(args.method)} ROC Plot. Radius={radius}, Params: {' '.join(params[index])}")
+        plt.legend(loc="lower right")
+
+        if args.interactive:
+            plt.show()
+        else:
+            plt.savefig(outdir + f"{args.method}_kfolds_r_{radius}_p_{'_'.join(params[index]).replace(',','-').replace('.','-')}", dpi=600)
+        plt.close("all")
+        plt.cla()
+
     print(f"[FINISH] {params[index]}")
 
 # ========== Main ==========
