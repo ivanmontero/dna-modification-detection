@@ -32,5 +32,13 @@ src/
 - visualization/
     * Contains all the code related to visualization.
 
-requirements.txt
-- Contains all the currently installed packages in my machine. Not necessarily representative of all the needed packages (TODO(ivan): Filter out actual requirements)
+## Requirements
+* numpy
+* pandas
+* tensorflow
+* scikit-learn
+* matplotlib
+* xgboost
+* keras
+* scipy
+Latest versions should work
