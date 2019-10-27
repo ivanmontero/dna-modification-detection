@@ -1,5 +1,7 @@
 *.txt
 **/data
+!src/data/
 **/graphs
 *.tsv
 *.csv
+!requirements.txt
