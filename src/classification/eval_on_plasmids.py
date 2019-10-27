@@ -30,18 +30,17 @@ from itertools import islice
 
 # Keras
 from keras.models import Sequential
-from keras.layers import Dense, SpatialDropout1D
+from keras.layers import Dense, SpatialDropout1D, Dropout
 
 # Create training data
 c = pd.read_csv("../data/centers_r_25_n.csv")
+idx = c["Top IPD Ratio"] > c["Bottom IPD Ratio"]
 s = np.load("../data/sequences_r_25_n.npy")[()]
-
 print(s)
 ss = []
-ss.append((s["Top IPD Ratio"] - np.mean(s["Top IPD Ratio"])) /  np.std(s["Top IPD Ratio"]))
-ss.append((s["Bottom IPD Ratio"] - np.mean(s["Bottom IPD Ratio"])) /  np.std(s["Bottom IPD Ratio"]))
+ss.append((s["Top IPD Ratio"][idx] - np.mean(s["Top IPD Ratio"][idx])) /  np.std(s["Top IPD Ratio"][idx]))
 # print(pd.get_dummies(pd.DataFrame(s["Base"])))
-onehot = pd.get_dummies(pd.DataFrame(s["Base"]))
+onehot = pd.get_dummies(pd.DataFrame(s["Base"][idx]))
 print(onehot)
 for i in range(51):
     col = f"{i}_N"
@@ -50,7 +49,7 @@ for i in range(51):
 ss.append(onehot.values)
 X_train = np.concatenate(ss, axis=1)
 print(X_train.shape)
-y_train = c["Fold Change"].map(lambda x: 1 if x > 10 else 0).values
+y_train = c["Fold Change"][idx].map(lambda x: 1 if x > 10 else 0).values
 
 # Create model
 sizes = [int(float(i)*len(X_train[0])) for i in [1.0, 0.5, 0.25]]
@@ -85,6 +84,48 @@ def create_sequence(bases, ipd):
 
 # We want to see which T, when removed, drops the prediction value considerably
 def determine_t(bases, ipd, model):
+    # Returns the offset of the T in the sequence.
+
+    # List of T positions and their values.
+    t_pos = []
+    c_val = []
+    sequence = bases
+    # print(sequence)
+    for i, c in enumerate(sequence):
+        if c == "T":
+            t_pos.append(i - len(sequence) // 2)
+            te = []
+            for n in ["A", "C", "G"]:
+                # print(sequence)
+                # print(create_sequence(np.concatenate([sequence[:i], [n], sequence[i+1:]]), index))
+                te.append(create_sequence(np.concatenate([sequence[:i], [n], sequence[i+1:]]), ipd))
+                if te[-1].shape[0] != 255:
+                    del te[-1]
+                    continue
+                # print(te[-1].shape)
+            # print(np.array(te))
+            if len(te) != 3:
+                continue
+            try:
+                vals = model.predict(np.array(te))
+            except:
+                print("ERROR")
+                print(te)
+                print(te[0].shape)
+                print(te[1].shape)
+                print(te[2].shape)
+                continue
+            # print(vals)
+            c_val.append(min(vals))
+    if len(c_val) == 0:
+        return math.inf, math.inf
+    m = np.argmin(c_val)
+    return t_pos[m], c_val[m]
+
+# We want to see which A, when removed, drops the prediction value considerably.
+# This is since we are looking at the complement base, and predicting for Ts on
+# that strand.
+def determine_t_opposite(bases, ipd, model):
     # Returns the offset of the T in the sequence.
 
     # List of T positions and their values.

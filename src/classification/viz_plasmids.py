@@ -50,7 +50,7 @@ for n in o["refName"].unique():
         labeltop=False) # labels along the bottom edge are off
     # ax2.spines['bottom'].set_position(('outward', 36))
     p_j = pd.read_csv("../data/plasmid_and_j.csv")
-    js = p_j[(p_j["plasmid"] == mapping[n]) & (p_j["J"] == 1) & (p_j["strand"] == 0)]
+    js = p_j[(p_j["plasmid"] == mapping[n]) & (p_j["J"] == 1) & (p_j["strand"] == 0)] # 0
     print(js)
     for i in js["position"]:
         ax1.axvline(i, color="black")
