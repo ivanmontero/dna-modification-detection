@@ -47,19 +47,25 @@ parser = ArgumentParser()
 parser.add_argument("method",
                     help=("The method of classification. "
                           "Must be one of the following: "
-                          "knn, log_reg, svc, mlpc"))
-parser.add_argument("-r", "--radius", required=True,
-                    help="Radius to run classfier on.")
+                          "knn, log_reg, svc, mlpc"),
+                    default="keras_model")
+parser.add_argument("-r", "--radius",
+                    help="Radius to run classfier on.",
+                    default="25")
 parser.add_argument("-p", "--param", nargs="*", action='append',
-                    help="Parameters to the classfier.")
+                    help="Parameters to the classfier.",
+                    default="1.0,0.5,0.25 0.6 5")
 
 # Data related -- Required
-parser.add_argument("-c", "--centers", required=True,
-                    help="The file containing center IPD info.")
-parser.add_argument("-s", "--sequences", required=True,
-                    help="The file containing sequences.")
-parser.add_argument("-o", "--outdir", required=True,
-                    help="The directory to output.")
+parser.add_argument("-c", "--centers",
+                    help="The file containing center IPD info.",
+                    default="../../data/processed/plasmid_top_centers.csv")
+parser.add_argument("-s", "--sequences",
+                    help="The file containing sequences.",
+                    default="../../data/processed/plasmid_top_sequences.npy")
+parser.add_argument("-o", "--outdir",
+                    help="The directory to output.",
+                    default="../../graphs/classification/classify_kfolds_plasmid/")
 
 # Data related -- Optional
 parser.add_argument("--parallel", action="store_true",

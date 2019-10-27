@@ -33,9 +33,10 @@ from keras.models import Sequential
 from keras.layers import Dense, SpatialDropout1D, Dropout
 
 # Create training data
-c = pd.read_csv("../data/centers_r_25_n.csv")
+c = pd.read_csv("../../data/processed/centers_r_25_n.csv")
+# only top
 idx = c["Top IPD Ratio"] > c["Bottom IPD Ratio"]
-s = np.load("../data/sequences_r_25_n.npy")[()]
+s = np.load("../../data/processed/sequences_r_25_n.npy")[()]
 print(s)
 ss = []
 ss.append((s["Top IPD Ratio"][idx] - np.mean(s["Top IPD Ratio"][idx])) /  np.std(s["Top IPD Ratio"][idx]))
@@ -65,7 +66,7 @@ model.compile(optimizer="adam", loss="binary_crossentropy")
 model.fit(X_train, y_train, epochs=5) #CHANGE TO 25
 
 # Load plasmid data
-p = pd.read_csv("../data/plasmid.tsv", sep="\t")
+p = pd.read_csv("../../data/processed/plasmid.tsv", sep="\t")
 p = p[p["strand"] == 0].reset_index(drop=True)
 
 def create_window(seq, radius):
@@ -205,4 +206,4 @@ for c in p["refName"].unique():
     # print(c_vals.head(100))
     # print(p.head(100))
 
-p.to_csv("plasmid_w_predictions.tsv", sep="\t", index=False)
+p.to_csv("../../data/processed/plasmid_w_predictions.tsv", sep="\t", index=False)

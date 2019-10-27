@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 
-o = pd.read_csv("plasmid_w_predictions.tsv", sep="\t")
+o = pd.read_csv("../../data/processed/plasmid_w_predictions.tsv", sep="\t")
 # o.sort_values(by=["refName", "tpl"], inplace=True)
 # plt.hist(o[o["J_delta"] != 0]["J_delta"], bins=30)
 # plt.title("Plasmid Drop in Probability Distribution")
@@ -49,7 +49,7 @@ for n in o["refName"].unique():
         top=False,         # ticks along the top edge are off
         labeltop=False) # labels along the bottom edge are off
     # ax2.spines['bottom'].set_position(('outward', 36))
-    p_j = pd.read_csv("../data/plasmid_and_j.csv")
+    p_j = pd.read_csv("../../data/processed/plasmid_and_j.csv")
     js = p_j[(p_j["plasmid"] == mapping[n]) & (p_j["J"] == 1) & (p_j["strand"] == 0)] # 0
     print(js)
     for i in js["position"]:
