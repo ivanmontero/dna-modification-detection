@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np 
 import argparse
+import time
 
 # Return argparse arguments. 
 def setup():
@@ -25,14 +26,29 @@ def setup():
     parser.add_argument(
         '-c',
         '--columns',
-        default = ['top_base', 'bottom_base', 'top_ipd', 'bottom_ipd'],
+        default = ['top_base', 
+                   'bottom_base', 
+                   'top_ipd', 
+                   'bottom_ipd'],
         help = 'List of columns to include as features.')
 
     parser.add_argument(
         '-p',
         '--ipd',
         default = 2,
-        help = 'List of columns to include as features.')
+        help = 'IPD threshold value.')
+
+    parser.add_argument(
+        '-f',
+        '--fold-change',
+        default = 10,
+        help = 'Fold change threshold value.')
+
+    parser.add_argument(
+        '-e',
+        '--examples',
+        default = 50000,
+        help = 'Max number of examples from each class.')
 
     parser.add_argument(
         '-o', 
@@ -42,19 +58,68 @@ def setup():
     
     return parser.parse_args()
 
-def normalize(data):
-    pass
+def sample(data, examples):
+    if len(data) <= examples:
+        return data.index.values
+    else:
+        return data.sample(examples).index.values
+
+def windows(index, data, window, columns):
+    radius = int(window/2)
+    features = []
+
+    for i in range(len(index)):
+        chromosome = index[i][0]
+        position = index[i][1]
+
+        start = time.time()
+
+        vector = {}
+        for column in columns:
+            vector[column] = []
+
+        for i in range(lower_bound, upper_bound):
+            selection =  data.loc[chromosome, position]
+            for column in columns:
+                vector[column].append(selection[column])
+
+        concatenation = []
+        for column in columns:
+            concatenation += vector[column]
+
+        features.append(concatenation) 
+
+        print (time.time() - start)
+
+    return features
 
 def main():
-    data = pd.read_csv('/active/myler_p/People/Sur/J-IP/LtaP/ivan-pacbio/merged_data.csv',
-                        usecols = ['top_base', 'bottom_base', 'top_ipd', 'bottom_ipd', 'top_coverage', 'bottom_coverage'])
+    start = time.time()
+    arguments = setup()
 
-    print (data)
-    # normalized = (data-data.mean())/data.std()
+    data = pd.read_csv('/active/myler_p/People/Sur/J-IP/LtaP/ivan-pacbio/merged_data.csv', 
+        usecols = list(arguments.columns) + ['chromosome','position','fold_change'], 
+        index_col = ['chromosome','position'])
 
-    # print (normalized)
+    data = data.dropna()
 
+    ipd = arguments.ipd
+    fold_change = arguments.fold_change
 
+    true_positive = data[((data['top_ipd'] > ipd) | (data['bottom_ipd'] > ipd)) & (data['fold_change'] > fold_change)]
+    false_positive = data[((data['top_ipd'] > ipd) | (data['bottom_ipd'] > ipd)) & (data['fold_change'] < fold_change)]
+    true_negative = data[(data['top_ipd'] < ipd) & (data['bottom_ipd'] < ipd) & (data['fold_change'] < fold_change)]
+    false_negative = data[(data['top_ipd'] < ipd) & (data['bottom_ipd'] < ipd) & (data['fold_change'] > fold_change)]
+
+    true_positive = sample(true_positive, arguments.examples)
+    false_positive = sample(false_positive, arguments.examples)
+    true_negative = sample(true_negative, arguments.examples)
+    false_negative = sample(false_negative, arguments.examples)
+
+    true_positive_features = windows(true_positive, data, arguments.window, arguments.columns)
+
+    elapsed = time.time() - start
+    print (f'{elapsed:.0f} seconds elapsed.')
 
 if __name__ == '__main__':
     main()
