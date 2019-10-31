@@ -10,13 +10,7 @@ def setup():
     parser = argparse.ArgumentParser(
         description = 'Create a TSV file with a set of peaks.')
 
-    parser.version = 0.1
-
-    parser.add_argument(
-        '-f', 
-        '--fasta', 
-        required = True,
-        help = 'Fasta file for genome.')
+    parser.version = 0.2
 
     parser.add_argument(
         '-i', 
@@ -27,7 +21,6 @@ def setup():
     parser.add_argument(
         '-c', 
         '--fold-change', 
-        required = True,
         help = 'Fold change file.')
 
     parser.add_argument(
@@ -37,76 +30,6 @@ def setup():
         help = 'Output file.')
     
     return parser.parse_args()
-
-# Read fasta file and output dictionary with chromosomes, positions, and base
-# information. 
-def read_fasta(filename):
-    sequence = ''
-    chromosomes = []
-    position = []
-
-    with open(filename) as infile:
-        current = ''
-        for line in infile:
-
-            # Headers begin with the '>' symbol. 
-            if '>' in line:
-                if current:
-                    chromosomes += [name]*len(current)
-                    position += range(1,len(current)+1)
-                    sequence += current
-
-                name = line.strip()[1:]
-                current = ''
-            else:
-                current += line.strip()
-
-    chromosomes += [name]*len(current)
-    position += range(1,len(current)+1)
-    sequence += current
-
-    return {'chromosome': chromosomes, 
-            'position': position, 
-            'top': list(sequence.upper())}
-
-# Get the complement DNA sequence for information on the other strand.
-def get_complement(sequence):
-    mapping = {'A': 'T',
-               'T': 'A',
-               'C': 'G',
-               'G': 'C',
-               'N': 'N'}
-
-    complement = []
-    for base in sequence:
-        complement.append(mapping[base])
-
-    return complement
-
-# Read in the file with fold change data. 
-def read_fold_change(filename):
-    fold_change = []   
-    with open(filename) as infile:
-        for line in infile:
-            fold_change.append(float(line))
-
-    return {'fold_change': fold_change}
-
-# Unfortunately it looks like the data columns don't match in size. In
-# particular, the fasta file has a total length of 32,226,625 bases, and the fold
-# change file has 32,226,627 bases. We trim off the difference in this function. 
-def balance_sizes(sequence, fold_change):
-    sequence_size = len(sequence['chromosome'])
-    fold_change_size = len(fold_change['fold_change'])
-
-    if sequence_size > fold_change_size:
-        sequence['chromosome'] = sequence['chromosome'][:fold_change_size]
-        sequence['top'] = sequence['top'][:fold_change_size]
-    elif fold_change_size > sequence_size:
-        fold_change['fold_change'] = fold_change['fold_change'][:sequence_size]
-
-    sequence['bottom'] = get_complement(sequence['top'])
-    return pd.DataFrame(sequence), pd.DataFrame(fold_change)
 
 def plot(data, filename):
 
@@ -158,25 +81,29 @@ def normalize(data):
     return data
 
 def main():
-    start = time.time()
+    total_start = time.time()
     arguments = setup()
 
-    print ('Reading FASTA file.')
-    sequence = read_fasta(arguments.fasta)
     print ('Reading fold change file.')
-    fold_change = read_fold_change(arguments.fold_change)
-    sequence, fold_change = balance_sizes(sequence, fold_change)
-    print ('Merging files.')
-    data = sequence.join(fold_change)
+    start = time.time()
+    fold_change = pd.read_csv(arguments.fold_change)
+
+    # Set Multindex 
+    fold_change = fold_change.set_index(['chromosome', 'position'])
+    elapsed = time.time() - start
+    print (f'{elapsed:.0f} seconds elapsed.')
     
     print ('Reading IPD file.')
+    start = time.time()
     ipd = pd.read_csv(arguments.ipd)
-    top_strand = ipd[ipd['strand'] == 0].drop(columns = ['strand', 'base'])
-    bottom_strand = ipd[ipd['strand'] == 1].drop(columns = ['strand', 'base'])
+    top_strand = ipd[ipd['strand'] == 0].drop(columns = ['strand'])
+    bottom_strand = ipd[ipd['strand'] == 1].drop(columns = ['strand'])
 
+    # Rename columns so they are unique for top and bottom strand. 
     top_strand = top_strand.rename(columns = {
         'refName': 'chromosome',
         'tpl': 'position',
+        'base': 'top_base',
         'score': 'top_score',
         'tMean': 'top_mean',
         'tErr': 'top_error',
@@ -185,9 +112,11 @@ def main():
         'coverage': 'top_coverage'
     })
 
+
     bottom_strand = bottom_strand.rename(columns = {
         'refName': 'chromosome',
         'tpl': 'position',
+        'base': 'bottom_base',
         'score': 'bottom_score',
         'tMean': 'bottom_mean',
         'tErr': 'bottom_error',
@@ -196,32 +125,51 @@ def main():
         'coverage': 'bottom_coverage'
     })
 
-    print ('Merging files.')
-    data = pd.merge(data, top_strand, on = ['chromosome', 'position'], how = 'outer')
-    data = pd.merge(data, bottom_strand, on = ['chromosome', 'position'], how = 'outer')
-
-    print ('Plotting histograms.')
-    filename = '.'.join(arguments.output.split('.')[:-1]) + str('.pdf')
-    plot(data, filename)
-
-    print ('Normalizing data.')
-    data = normalize(data)
+    # Set multindex.
+    top_strand = top_strand.set_index(['chromosome', 'position'])
+    bottom_strand = bottom_strand.set_index(['chromosome', 'position'])
+    elapsed = time.time() - start
+    print (f'{elapsed:.0f} seconds elapsed.')
 
     print ('Encoding bases.')
-    top_encoding = pd.get_dummies(data['top'])
-    bottom_encoding = pd.get_dummies(data['bottom'])
-    data = data.drop(columns = ['top', 'bottom'])
-    data = data.join(top_encoding)
-    data = data.join(bottom_encoding)
+    start = time.time()
+    top_encoding = pd.get_dummies(top_strand['top_base'], prefix = 'top')
+    bottom_encoding = pd.get_dummies(bottom_strand['bottom_base'], prefix = 'bottom')
+   
+    # Merge encodings.
+    top_strand = pd.merge(top_strand, top_encoding, on = ['chromosome', 'position'])
+    bottom_strand = pd.merge(bottom_strand, bottom_encoding, on = ['chromosome', 'position'])
 
-    print (data)
+    # Drop base column.
+    top_strand = top_strand.drop(columns = 'top_base')
+    bottom_strand = bottom_strand.drop(columns = 'bottom_base')
+    elapsed = time.time() - start
+    print (f'{elapsed:.0f} seconds elapsed.')
+
+    print ('Merging files.')
+    start = time.time()
+    data = pd.merge(top_strand, bottom_strand, on = ['chromosome', 'position'])
+    data = pd.merge(data, fold_change, on = ['chromosome', 'position'])
+    elapsed = time.time() - start
+    print (f'{elapsed:.0f} seconds elapsed.') 
+
+    print ('Plotting histograms.')
+    start = time.time()
+    filename = '.'.join(arguments.output.split('.')[:-1]) + str('.pdf')
+    plot(data, filename)
+    elapsed = time.time() - start
+    print (f'{elapsed:.0f} seconds elapsed.')
+
+    print ('Normalizing data.')
+    start = time.time()
+    data = normalize(data)
+    elapsed = time.time() - start
+    print (f'{elapsed:.0f} seconds elapsed.')
 
     print ('Writing output.')
+    start = time.time()
     data.round(4).to_csv(arguments.output,
-        index = False, 
-        columns = ['chromosome',
-                   'position',
-                   'fold_change',
+        columns = ['fold_change',
                    'top_A',
                    'top_T',
                    'top_C',
@@ -242,9 +190,11 @@ def main():
                    'bottom_error',
                    'top_prediction',
                    'bottom_prediction'])
-    
     elapsed = time.time() - start
     print (f'{elapsed:.0f} seconds elapsed.')
+    
+    elapsed = time.time() - total_start
+    print (f'{elapsed:.0f} seconds elapsed in total.')
 
 if __name__ == '__main__':
     main()

@@ -26,8 +26,10 @@ def setup():
     parser.add_argument(
         '-c',
         '--columns',
-        default = ['top_base', 
-                   'bottom_base', 
+        default = ['top_A',
+                   'top_T',
+                   'top_C',
+                   'top_G', 
                    'top_ipd', 
                    'bottom_ipd'],
         help = 'List of columns to include as features.')
