@@ -8,7 +8,7 @@ import time
 # Return argparse arguments. 
 def setup():
     parser = argparse.ArgumentParser(
-        description = 'Create a TSV file with a set of peaks.')
+        description = 'Create a HDF file with a set of peaks.')
 
     parser.version = 0.2
 
@@ -20,7 +20,8 @@ def setup():
 
     parser.add_argument(
         '-c', 
-        '--fold-change', 
+        '--fold-change',
+        default = None, 
         help = 'Fold change file.')
 
     parser.add_argument(
@@ -84,14 +85,15 @@ def main():
     total_start = time.time()
     arguments = setup()
 
-    print ('Reading fold change file.')
-    start = time.time()
-    fold_change = pd.read_csv(arguments.fold_change)
+    if arguments.fold_change:
+        print ('Reading fold change file.')
+        start = time.time()
+        fold_change = pd.read_csv(arguments.fold_change)
 
-    # Set Multindex 
-    fold_change = fold_change.set_index(['chromosome', 'position'])
-    elapsed = time.time() - start
-    print (f'{elapsed:.0f} seconds elapsed.')
+        # Set Multindex 
+        fold_change = fold_change.set_index(['chromosome', 'position'])
+        elapsed = time.time() - start
+        print (f'{elapsed:.0f} seconds elapsed.')
     
     print ('Reading IPD file.')
     start = time.time()
@@ -149,7 +151,10 @@ def main():
     print ('Merging files.')
     start = time.time()
     data = pd.merge(top_strand, bottom_strand, on = ['chromosome', 'position'])
-    data = pd.merge(data, fold_change, on = ['chromosome', 'position'])
+
+    if arguments.fold_change:
+        data = pd.merge(data, fold_change, on = ['chromosome', 'position'])
+        
     elapsed = time.time() - start
     print (f'{elapsed:.0f} seconds elapsed.') 
 
@@ -168,28 +173,7 @@ def main():
 
     print ('Writing output.')
     start = time.time()
-    data.round(4).to_csv(arguments.output,
-        columns = ['fold_change',
-                   'top_A',
-                   'top_T',
-                   'top_C',
-                   'top_G',
-                   'bottom_A',
-                   'bottom_T',
-                   'bottom_C',
-                   'bottom_G',
-                   'top_ipd',
-                   'bottom_ipd',
-                   'top_coverage',
-                   'bottom_coverage',
-                   'top_score',
-                   'bottom_score',
-                   'top_mean',
-                   'bottom_mean',
-                   'top_error',
-                   'bottom_error',
-                   'top_prediction',
-                   'bottom_prediction'])
+    data.round(4).to_hdf(arguments.output, 'data')
     elapsed = time.time() - start
     print (f'{elapsed:.0f} seconds elapsed.')
     
