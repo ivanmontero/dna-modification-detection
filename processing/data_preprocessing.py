@@ -21,7 +21,6 @@ def setup():
     parser.add_argument(
         '-c', 
         '--fold-change',
-        default = None, 
         help = 'Fold change file.')
 
     parser.add_argument(
@@ -154,7 +153,7 @@ def main():
 
     if arguments.fold_change:
         data = pd.merge(data, fold_change, on = ['chromosome', 'position'])
-        
+
     elapsed = time.time() - start
     print (f'{elapsed:.0f} seconds elapsed.') 
 
