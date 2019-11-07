@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 
-o = pd.read_csv("../../data/processed/plasmid_w_predictions.tsv", sep="\t")
+o = pd.read_csv("../../data/processed/plasmid_w_predictions_dual.tsv", sep="\t")
 # o.sort_values(by=["refName", "tpl"], inplace=True)
 # plt.hist(o[o["J_delta"] != 0]["J_delta"], bins=30)
 # plt.title("Plasmid Drop in Probability Distribution")
@@ -24,7 +24,7 @@ plt.rcParams["figure.figsize"] = (12, 7)
 
 for n in o["refName"].unique():
     p = o[o["refName"] == n]
-    # p = p[p["strand"] == 0]
+    p = p[p["strand"] == 0]
     if n not in mapping.keys():
         continue
 

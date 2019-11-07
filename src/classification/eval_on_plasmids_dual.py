@@ -33,8 +33,8 @@ from keras.models import Sequential
 from keras.layers import Dense, SpatialDropout1D, Dropout
 
 # Create training data
-c = pd.read_csv("../data/centers_r_25_n.csv")
-s = np.load("../data/sequences_r_25_n.npy")[()]
+c = pd.read_csv("../../data/processed/centers_r_25_n.csv")
+s = np.load("../../data/processed/sequences_r_25_n.npy")[()]
 
 print(s)
 ss = []
@@ -63,10 +63,10 @@ for i in range(1, len(sizes)):
     model.add(Dropout(do))
 model.add(Dense(1, activation="sigmoid"))
 model.compile(optimizer="adam", loss="binary_crossentropy")
-model.fit(X_train, y_train, epochs=1) #CHANGE TO 25
+model.fit(X_train, y_train, epochs=5) #CHANGE TO 25
 
 # Load plasmid data
-p = pd.read_csv("../data/plasmid.tsv", sep="\t")
+p = pd.read_csv("../../data/interim/plasmid.tsv", sep="\t")
 # p = p[p["strand"] == 0].reset_index(drop=True)
 
 def create_window(seq, radius):
@@ -100,7 +100,8 @@ def determine_t(bases, ipd, model):
                 # print(sequence)
                 # print(create_sequence(np.concatenate([sequence[:i], [n], sequence[i+1:]]), index))
                 te.append(create_sequence(np.concatenate([sequence[:i], [n], sequence[i+1:]]), ipd))
-                if te[-1].shape[0] != 255:
+                # print(te[-1].shape[0])
+                if te[-1].shape[0] != 306:
                     del te[-1]
                     continue
                 # print(te[-1].shape)
@@ -129,13 +130,13 @@ p["J_pred"] = 0.0
 p["J_delta"] = 0.0
 p["J_detections"] = 0
 for c in p["refName"].unique():
-    print(f"===== {c} =====")
+    # print(f"===== {c} =====")
     c_vals = p[p["refName"] == c]
-    print(c_vals.shape)
-    print(c_vals)
+    # print(c_vals.shape)
+    # print(c_vals)
     # print(c_vals)
     ipd_windows_top = create_window(c_vals[c_vals["strand"] == 0]["ipdRatio"], radius)
-    ipd_windows_bottom = create_window(c_vals[c_vals["strand"] == 0]["ipdRatio"], radius)
+    ipd_windows_bottom = create_window(c_vals[c_vals["strand"] == 1]["ipdRatio"], radius)
     ipd_windows_top = (ipd_windows_top - np.average(ipd_windows_top))/np.std(ipd_windows_top)
     ipd_windows_bottom = (ipd_windows_bottom - np.average(ipd_windows_bottom))/np.std(ipd_windows_bottom)
     base_windows = create_window(c_vals[c_vals["strand"] == 0]["base"], radius)
@@ -146,17 +147,18 @@ for c in p["refName"].unique():
     y_pred = model.predict(X_test)
     # print(c_vals.iloc[radius:c_vals.shape[0] - radius, :].values.shape)
     # print(y_pred.shape)
-    for i, pred_row in enumerate(zip(y_pred, c_vals.iloc[radius:c_vals.shape[0] - radius, :].iterrows())):
+    for i, pred_row in enumerate(zip(y_pred, c_vals[c_vals["strand"] == 0].iloc[radius:c_vals.shape[0] - radius, :].iterrows())):
         # print(pred_row)
-        print(pred_row[1][0])
+        # print(pred_row[1][0])
         p.at[pred_row[1][0],"J_pred"] = pred_row[0]
         # print(pred_row[1][0])
         if pred_row[0] > THRESHOLD:
             # pass
             offset, min_t = determine_t(base_windows[i], np.concatenate([ipd_windows_top[i], ipd_windows_bottom[i]]), model)
+            # print(min_t - pred_row[0])
             if offset == math.inf or min_t == math.inf:
                 continue
-            J_pos = pred_row[1][0] + offset
+            J_pos = pred_row[1][0] + offset*2
             # print(J_pos)
             p.at[J_pos,"J_detections"] += 1
             # p.at[J_pos,"J_delta"] = min(p.at[J_pos, "J_delta"], min_t - pred_row[0])
@@ -166,4 +168,4 @@ for c in p["refName"].unique():
     # print(c_vals.head(100))
     # print(p.head(100))
 
-p.to_csv("plasmid_w_predictions_dual.tsv", sep="\t", index=False)
+p.to_csv("../../data/processed/plasmid_w_predictions_dual.tsv", sep="\t", index=False)
