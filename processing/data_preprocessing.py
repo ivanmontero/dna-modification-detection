@@ -21,6 +21,7 @@ def setup():
     parser.add_argument(
         '-c', 
         '--fold-change',
+        default = False, 
         help = 'Fold change file.')
 
     parser.add_argument(
@@ -112,7 +113,6 @@ def main():
         'ipdRatio': 'top_ipd',
         'coverage': 'top_coverage'
     })
-
 
     bottom_strand = bottom_strand.rename(columns = {
         'refName': 'chromosome',
