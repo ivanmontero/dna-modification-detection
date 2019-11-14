@@ -9,7 +9,7 @@ from sklearn.neighbors import KNeighborsClassifier
 from sklearn.linear_model import LogisticRegression, RidgeClassifier
 from sklearn.neural_network import MLPClassifier
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import StratifiedKFold
+from sklearn.model_selection import StratifiedKFold, KFold
 from sklearn.svm import SVC
 import matplotlib as mpl
 mpl.use('Agg')
@@ -153,7 +153,7 @@ if __name__ == "__main__":
     plt.ylim([0, 1])
     plt.xlabel('False Positive Rate')
     plt.ylabel('True Positive Rate')
-    plt.title(f"{get_classfication_name(args.method)} ROC Plot, Params: {' '.join(params[index])}" if args.title is None else args.title)
+    plt.title(f"{get_classfication_name(args.method)} ROC Plot, Params: {' '.join(args.params)}" if args.title is None else args.title)
     plt.legend(loc="lower right")
 
     print(f"Saving plot to {args.outfile}")
