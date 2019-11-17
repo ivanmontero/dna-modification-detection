@@ -5,3 +5,5 @@
 *.tsv
 *.csv
 !requirements.txt
+*.h5
+models/
