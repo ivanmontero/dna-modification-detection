@@ -57,17 +57,17 @@ def main():
                         np.zeros(len(false_positive_features))])
 
     if arguments.save_classes:
-        classes = [['tp'] * len(true_positive_features) + 
-                  ['fn'] * len(false_negative_features) + 
-                  ['tn'] * len(true_negative_features) + 
-                  ['fp'] * len(false_positive_features)]
+        classes = ['tp'] * len(true_positive_features) + \
+                  ['fn'] * len(false_negative_features) + \
+                  ['tn'] * len(true_negative_features) + \
+                  ['fp'] * len(false_positive_features)
 
         data = {'vectors': features.tolist(), 
                 'positions': positions.tolist(), 
                 'classes': classes} 
 
-        if arguments.outfile:
-            filename = f'{arguments.outfile}_classes.json'
+        if arguments.output:
+            filename = f'{arguments.output}_classes.json'
             with open(filename, 'w') as outfile:
                 json.dump(data, outfile)
         else:
@@ -86,8 +86,8 @@ def main():
             'positions': positions.tolist(), 
             'labels': labels.tolist()}
 
-    if arguments.outfile:
-        with open(arguments.outfile, 'w') as outfile:
+    if arguments.output:
+        with open(arguments.output, 'w') as outfile:
             json.dump(data, outfile)
     else:
         directory = os.path.dirname(arguments.infile)

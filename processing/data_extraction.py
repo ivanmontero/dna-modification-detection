@@ -18,6 +18,7 @@ def setup():
         '-w', 
         '--window', 
         default = 50,
+        type = int, 
         help = 'The size of the window used for predictions.')
 
     parser.add_argument(
@@ -35,18 +36,21 @@ def setup():
         '-p',
         '--ipd',
         default = 2,
+        type = float,
         help = 'IPD threshold value.')
 
     parser.add_argument(
         '-f',
         '--fold-change',
         default = 10,
+        type = float, 
         help = 'Fold change threshold value.')
 
     parser.add_argument(
         '-e',
         '--examples',
         default = 1000,
+        type = int,
         help = 'Max number of examples from each class.')
 
     parser.add_argument(
@@ -57,7 +61,7 @@ def setup():
 
     parser.add_argument(
         '-o', 
-        '--outfile', 
+        '--output', 
         default = None,
         help = 'Output file. Default auto-generates name.')
     

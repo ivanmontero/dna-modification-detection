@@ -1,5 +1,5 @@
-from matplotlib import pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
+from matplotlib import pyplot as plt
 import pandas as pd
 import numpy as np
 import argparse
@@ -27,7 +27,7 @@ def setup():
     parser.add_argument(
         '-o', 
         '--output', 
-        default = 'output.tsv',
+        default = False,
         help = 'Output file.')
     
     return parser.parse_args()
@@ -166,13 +166,20 @@ def main():
 
     print ('Normalizing data.')
     start = time.time()
-    data = normalize(data)
+    data = normalize(data).round(4)
     elapsed = time.time() - start
     print (f'{elapsed:.0f} seconds elapsed.')
 
     print ('Writing output.')
     start = time.time()
-    data.round(4).to_hdf(arguments.output, 'data')
+
+    if arguments.output:
+        data.to_hdf(arguments.output, 'data')
+    else:
+        directory = os.path.dirname(arguments.ipd)
+        filename = os.path.join(directory, 'processed_data.hdf')
+        data.to_hdf(arguments.output, 'data')
+
     elapsed = time.time() - start
     print (f'{elapsed:.0f} seconds elapsed.')
     
