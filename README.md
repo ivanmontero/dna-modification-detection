@@ -4,13 +4,6 @@ Base J is a glycosylated nucleobase found in Trypanosomatids, a family of single
 We explore analytical approaches such as dimensionality reduction, machine learning, and signal processing to determine which patterns of interpulse duration (IPD) correspond to evidence for Base J across the entire Leishmania tarentolae genome.  We extract the IPD values and base sequences that appear near IPD peaks and train classifiers to predict whether they will appear near anti-J immunoprecipitation (ChIP) peaks.
 
 ## Repo format
-archive/
-- Contains all previous tried out methods, including:
-    * Dimensionality reduction methods
-    * Initial classification experiments
-    * Signal processing methods
-    * Thresholding methods
-
 data/
 - interim/
     * Intermediate data created from the raw data
