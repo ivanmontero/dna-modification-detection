@@ -4,6 +4,7 @@ import pandas as pd
 import numpy as np
 import argparse
 import time
+import os
 
 # Return argparse arguments. 
 def setup():
@@ -28,12 +29,31 @@ def setup():
         '-o', 
         '--output', 
         default = False,
-        help = 'Output file.')
-    
+        help = 'Output prefix.')
+
     return parser.parse_args()
 
-def plot(data, filename):
+# Start the timer. 
+def start_time(string):
+    print (string)
+    return time.time()
 
+# End the timer. 
+def end_time(start):
+    elapsed = time.time() - start
+    print (f'{elapsed:.0f} seconds elapsed.')
+
+def project_path():
+    script_path = os.path.abspath(__file__)
+    script_folder = os.path.dirname(script_path)
+    src_folder = os.path.dirname(script_folder)
+    project_folder = os.path.dirname(src_folder)
+    
+    return project_folder
+
+# Plot histograms of the data. 
+def plot(data, filename):
+   
     columns = [('fold_change', 'Fold Change', np.linspace(0, 20, 101)),
                ('top_ipd', 'Top IPD', np.linspace(0, 5, 101)),
                ('bottom_ipd', 'Bottom IPD', np.linspace(0, 5, 101)),
@@ -44,9 +64,7 @@ def plot(data, filename):
                ('top_mean', 'Top Mean', np.linspace(0, 10, 101)),
                ('bottom_mean', 'Bottom Mean', np.linspace(0, 10, 101)),
                ('top_error', 'Top Error', np.linspace(0, 2, 101)),
-               ('bottom_error', 'Bottom Error', np.linspace(0, 2, 101)),
-               ('top_prediction', 'Top Prediction', np.linspace(0, 5, 101)),
-               ('bottom_prediction', 'Bottom Prediction', np.linspace(0, 5, 101))]
+               ('bottom_error', 'Bottom Error', np.linspace(0, 2, 101))]
 
     with PdfPages(filename) as pdf: 
         for column in columns:
@@ -61,6 +79,7 @@ def plot(data, filename):
             pdf.savefig()
             plt.close()
 
+# Mean and standard deviation normalization of the data. 
 def normalize(data):
 
     columns = ['top_ipd',
@@ -72,68 +91,62 @@ def normalize(data):
                'top_mean',
                'bottom_mean',
                'top_error',
-               'bottom_error',
-               'top_prediction',
-               'bottom_prediction']
+               'bottom_error']
 
     for column in columns:
         data[column] = (data[column] - data[column].mean())/data[column].std()
 
     return data
 
-def main():
-    total_start = time.time()
+def main(): 
+    # Get argparse arguments. 
     arguments = setup()
-
+    
+    # If there is ChIP data: 
     if arguments.fold_change:
-        print ('Reading fold change file.')
-        start = time.time()
+        start = start_time('Reading fold change file.')
         fold_change = pd.read_csv(arguments.fold_change)
 
-        # Set Multindex 
+        # Set Multindex. 
         fold_change = fold_change.set_index(['chromosome', 'position'])
-        elapsed = time.time() - start
-        print (f'{elapsed:.0f} seconds elapsed.')
-    
-    print ('Reading IPD file.')
-    start = time.time()
+        end_time(start)
+
+    # Load the IPD data. 
+    start = start_time('Reading IPD file.')
     ipd = pd.read_csv(arguments.ipd)
     top_strand = ipd[ipd['strand'] == 0].drop(columns = ['strand'])
     bottom_strand = ipd[ipd['strand'] == 1].drop(columns = ['strand'])
 
     # Rename columns so they are unique for top and bottom strand. 
     top_strand = top_strand.rename(columns = {
-        'refName': 'chromosome',
-        'tpl': 'position',
+        'ref_name': 'chromosome',
+        'index': 'position',
         'base': 'top_base',
         'score': 'top_score',
-        'tMean': 'top_mean',
-        'tErr': 'top_error',
-        'modelPrediction': 'top_prediction',
-        'ipdRatio': 'top_ipd',
-        'coverage': 'top_coverage'
+        'trimmed_mean': 'top_mean',
+        'trimmed_error': 'top_error',
+        'ipd_ratio': 'top_ipd',
+        'case_coverage': 'top_coverage'
     })
 
     bottom_strand = bottom_strand.rename(columns = {
-        'refName': 'chromosome',
-        'tpl': 'position',
+        'ref_name': 'chromosome',
+        'index': 'position',
         'base': 'bottom_base',
         'score': 'bottom_score',
-        'tMean': 'bottom_mean',
-        'tErr': 'bottom_error',
-        'modelPrediction': 'bottom_prediction',
-        'ipdRatio': 'bottom_ipd',
-        'coverage': 'bottom_coverage'
+        'trimmed_mean': 'bottom_mean',
+        'trimmed_error': 'bottom_error',
+        'ipd_ratio': 'bottom_ipd',
+        'case_coverage': 'bottom_coverage'
     })
 
     # Set multindex.
     top_strand = top_strand.set_index(['chromosome', 'position'])
     bottom_strand = bottom_strand.set_index(['chromosome', 'position'])
-    elapsed = time.time() - start
-    print (f'{elapsed:.0f} seconds elapsed.')
+    end_time(start)
 
-    print ('Encoding bases.')
-    start = time.time()
+    # Encode bases. 
+    start = start_time('Encoding bases.')
     top_encoding = pd.get_dummies(top_strand['top_base'], prefix = 'top')
     bottom_encoding = pd.get_dummies(bottom_strand['bottom_base'], prefix = 'bottom')
    
@@ -144,48 +157,41 @@ def main():
     # Drop base column.
     top_strand = top_strand.drop(columns = 'top_base')
     bottom_strand = bottom_strand.drop(columns = 'bottom_base')
-    elapsed = time.time() - start
-    print (f'{elapsed:.0f} seconds elapsed.')
+    end_time(start)
 
-    print ('Merging files.')
-    start = time.time()
+    # Merge the top strand and bottom strand and ChIP if present. 
+    start = start_time('Merging files.')
     data = pd.merge(top_strand, bottom_strand, on = ['chromosome', 'position'])
-
     if arguments.fold_change:
         data = pd.merge(data, fold_change, on = ['chromosome', 'position'])
+    end_time(start)
 
-    elapsed = time.time() - start
-    print (f'{elapsed:.0f} seconds elapsed.') 
-
-    print ('Plotting histograms.')
-    start = time.time()
-    filename = '.'.join(arguments.output.split('.')[:-1]) + str('.pdf')
-    plot(data, filename)
-    elapsed = time.time() - start
-    print (f'{elapsed:.0f} seconds elapsed.')
-
-    print ('Normalizing data.')
-    start = time.time()
-    data = normalize(data).round(4)
-    elapsed = time.time() - start
-    print (f'{elapsed:.0f} seconds elapsed.')
-
-    print ('Writing output.')
-    start = time.time()
+    # Plot the histograms of each feature. 
+    start = start_time('Plotting histograms.')
+    top_level = project_path()
+    report_folder = os.path.join(top_level, 'reports')
 
     if arguments.output:
-        data.to_hdf(arguments.output, 'data')
+        filename = os.path.join(report_folder, f'{arguments.output}_histograms.pdf')
     else:
-        directory = os.path.dirname(arguments.ipd)
-        filename = os.path.join(directory, 'processed_data.hdf')
-        data.to_hdf(arguments.output, 'data')
+        filename = os.path.join(report_folder, 'histograms.pdf')
 
-    elapsed = time.time() - start
-    print (f'{elapsed:.0f} seconds elapsed.')
-    
-    elapsed = time.time() - total_start
-    print (f'{elapsed:.0f} seconds elapsed in total.')
+    plot(data, filename)
+    end_time(start)
+
+    # Normalize data and output to HDF file. 
+    start = start_time('Writing output.')
+    data = normalize(data).round(4)
+
+    data_folder = os.path.join(top_level, 'data')
+    interm_folder = os.path.join(data_folder, 'interm')
+    if arguments.output:
+        filename = os.path.join(interm_folder, f'{arguments.output}_merged_data.h5')
+    else:
+        filename = os.path.join(interm_folder, 'merged_data.h5')
+
+    data.to_hdf(filename, 'data')
+    end_time(start)
 
 if __name__ == '__main__':
     main()
-
