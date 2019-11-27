@@ -1,3 +1,4 @@
+!.gitkeep
 data/raw/*
 data/interm/*
 data/processed/*
