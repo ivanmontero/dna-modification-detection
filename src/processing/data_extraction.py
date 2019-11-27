@@ -1,3 +1,4 @@
+import numpy as np
 import argparse
 
 # Return argparse arguments. 
@@ -22,7 +23,6 @@ def setup():
         help = 'The size of the window used for predictions.')
 
     parser.add_argument(
-        '-c',
         '--columns',
         default = ['top_A',
                    'top_T',
@@ -33,14 +33,12 @@ def setup():
         help = 'List of columns to include as features.')
 
     parser.add_argument(
-        '-p',
         '--ipd',
         default = 2,
         type = float,
         help = 'IPD threshold value.')
 
     parser.add_argument(
-        '-f',
         '--fold-change',
         default = 10,
         type = float, 
@@ -112,6 +110,33 @@ def windows(index, data, window, columns):
     print (f'Skipped {k} examples because of missing values.')
     return features, positions
 
+# Only works if the first four columns are one-hot encodes of top strand 
+# sequence. (Default) 
+def create_fasta(vectors, window):
+    sequences = []
+    bases = np.array(['A', 'T', 'C', 'G'])
+
+    for example in vectors:
+        current = []
+        for i in range(window):
+            index = np.array([example[i], 
+                              example[i + window],
+                              example[i + (window * 2)],
+                              example[i + (window * 3)]]
+                              , dtype = bool)
+            current += list(bases[index])
+
+        sequences.append(current)
+
+    output = ''
+    for i in range(len(sequences)):
+        header = f'>{i}\n'
+        sequence = ''.join(sequences[i])
+        line = f'{sequence}\n' 
+
+        output += header + line
+
+    return output
 
 
 

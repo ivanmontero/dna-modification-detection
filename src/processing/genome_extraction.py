@@ -56,6 +56,7 @@ def main():
                         np.zeros(len(true_negative_features)),
                         np.zeros(len(false_positive_features))])
 
+    directory = os.path.dirname(arguments.infile)
     if arguments.save_classes:
         classes = ['tp'] * len(true_positive_features) + \
                   ['fn'] * len(false_negative_features) + \
@@ -64,36 +65,77 @@ def main():
 
         data = {'vectors': features.tolist(), 
                 'positions': positions.tolist(), 
-                'classes': classes} 
+                'classes': classes}
 
         if arguments.output:
-            filename = f'{arguments.output}_classes.json'
-            with open(filename, 'w') as outfile:
-                json.dump(data, outfile)
+            filename = os.path.join(directory, f'{arguments.output}_classes.json')
         else:
-            directory = os.path.dirname(arguments.infile)
             filename = os.path.join(directory, 'classes.json')
+
+        with open(filename, 'w') as outfile:
+            json.dump(data, outfile, indent = 4)
+
+        tp_seqeunces = data_extraction.create_fasta(true_positive_features, arguments.window)
+        fn_seqeunces = data_extraction.create_fasta(false_negative_features, arguments.window)
+        tn_seqeunces = data_extraction.create_fasta(true_negative_features, arguments.window)
+        fp_seqeunces = data_extraction.create_fasta(false_positive_features, arguments.window)
+
+        if arguments.output:        
+            filename = os.path.join(directory, f'{arguments.output}_tp.fasta')
             with open(filename, 'w') as outfile:
-                json.dump(data, outfile)
+                outfile.write(tp_seqeunces)
+
+            filename = os.path.join(directory, f'{arguments.output}_fn.fasta')
+            with open(filename, 'w') as outfile:
+                outfile.write(fn_seqeunces)
+
+            filename = os.path.join(directory, f'{arguments.output}_tn.fasta')
+            with open(filename, 'w') as outfile:
+                outfile.write(tn_seqeunces)
+
+            filename = os.path.join(directory, f'{arguments.output}_fp.fasta')
+            with open(filename, 'w') as outfile:
+                outfile.write(fp_seqeunces)
+
+        else:
+            filename = os.path.join(directory, 'tp.fasta')
+            with open(filename, 'w') as outfile:
+                outfile.write(tp_seqeunces)
+
+            filename = os.path.join(directory, 'fn.fasta')
+            with open(filename, 'w') as outfile:
+                outfile.write(fn_seqeunces)
+
+            filename = os.path.join(directory, 'tn.fasta')
+            with open(filename, 'w') as outfile:
+                outfile.write(tn_seqeunces)
+
+            filename = os.path.join(directory, 'fp.fasta')
+            with open(filename, 'w') as outfile:
+                outfile.write(fp_seqeunces)
 
     index = np.random.permutation(len(features))
     features = features[index]
     positions = positions[index]
     labels = labels[index]
 
+    column_labels = []
+    for column in arguments.columns:
+        column_labels += [column] * arguments.window
+
     print ('Writing output.')
-    data = {'vectors': features.tolist(), 
+    data = {'columns': column_labels,
+            'vectors': features.tolist(), 
             'positions': positions.tolist(), 
             'labels': labels.tolist()}
 
     if arguments.output:
-        with open(arguments.output, 'w') as outfile:
-            json.dump(data, outfile)
+        filename = os.path.join(directory, f'{arguments.output}.json')
     else:
-        directory = os.path.dirname(arguments.infile)
         filename = os.path.join(directory, 'data.json')
-        with open(filename, 'w') as outfile:
-            json.dump(data, outfile)
+
+    with open(filename, 'w') as outfile:
+        json.dump(data, outfile, indent = 4)
 
     elapsed = time.time() - total_start
     print (f'{elapsed:.0f} seconds elapsed in total.')
