@@ -34,4 +34,3 @@ src/
 * xgboost
 * keras
 * scipy
-Latest versions should work
