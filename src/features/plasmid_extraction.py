@@ -11,8 +11,7 @@ def main():
 
     print ('Reading data.')
     start = time.time()
-    data = pd.read_hdf(arguments.infile)
-    data = data[arguments.columns]
+    data = pd.read_hdf(arguments.infile, arguments.columns)
     elapsed = time.time() - start
     print (f'{elapsed:.0f} seconds elapsed.')
 

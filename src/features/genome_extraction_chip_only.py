@@ -2,19 +2,14 @@ import data_extraction
 import pandas as pd
 import numpy as np
 import json
-import time
 import os
 
 def main():
-    total_start = time.time()
     arguments = data_extraction.setup()
 
-    print ('Reading data.')
-    start = time.time()
-    data = pd.read_hdf(arguments.infile)
-    data = data[['fold_change'] + arguments.columns]
-    elapsed = time.time() - start
-    print (f'{elapsed:.0f} seconds elapsed.')
+    start = data_extraction.start_time('Reading data.')
+    data = pd.read_hdf(arguments.infile, columns = ['fold_change'] + arguments.columns)
+    data_extraction.end_time(start)
 
     print ('Filtering data.')
     fold_change = arguments.fold_change
@@ -25,12 +20,11 @@ def main():
     positive = data_extraction.sample(positive, arguments.examples)
     negative = data_extraction.sample(negative, arguments.examples)
 
-    print ('Extracting windows.')
-    start = time.time()
+    start = data_extraction.start_time('Extracting windows.')
+    data = pd.read_hdf(arguments.infile)
     positive_features, positive_positions = data_extraction.windows(positive, data, arguments.window, arguments.columns)
     negative_features, negative_positions = data_extraction.windows(negative, data, arguments.window, arguments.columns)
-    elapsed = time.time() - start
-    print (f'{elapsed:.0f} seconds elapsed.')
+    data_extraction.end_time(start)
 
     print ('Creating labels.')
     features = np.vstack([positive_features,negative_features])
@@ -52,17 +46,16 @@ def main():
             'positions': positions.tolist(), 
             'labels': labels.tolist()}
 
-    directory = os.path.dirname(arguments.infile)
-    if arguments.output:
-        filename = os.path.join(directory, f'{arguments.output}.json')
+    project_folder = data_extraction.project_path()
+    data_folder = os.path.join(project_folder, 'data')
+    processed_folder = os.path.join(data_folder, 'processed')
+    if arguments.prefix:
+        filename = os.path.join(processed_folder, f'{arguments.prefix}_data.json')
     else:
-        filename = os.path.join(directory, 'data.json')
+        filename = os.path.join(processed_folder, 'data.json')
 
     with open(filename, 'w') as outfile:
         json.dump(data, outfile, indent = 4)
-
-    elapsed = time.time() - total_start
-    print (f'{elapsed:.0f} seconds elapsed in total.')
 
 if __name__ == '__main__':
     main()
