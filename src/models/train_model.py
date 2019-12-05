@@ -63,9 +63,9 @@ def load(filename):
 
     return data, labels
 
-def create_model():
+def create_model(input_dim):
     model = keras.Sequential()
-    model.add(keras.layers.Dense(300, activation="relu"))
+    model.add(keras.layers.Dense(300, input_dim = input_dim, activation="relu"))
     model.add(keras.layers.Dropout(0.5))
     model.add(keras.layers.Dense(150, activation="relu"))
     model.add(keras.layers.Dropout(0.5))
@@ -134,7 +134,7 @@ def plot(x, y, name, filename):
         x_test = x[test]
         y_test = y[test]
 
-        model = create_model()
+        model = create_model(len(x_train[0]))
         y_scores, history = train_network(model, x_train, y_train, x_test, y_test)
         
         fpr, tpr, thresholds = metrics.roc_curve(y_test, y_scores)
@@ -238,7 +238,7 @@ def main():
     else:
         filename = os.path.join(models_folder, 'model.h5')
 
-    model = create_model()
+    model = create_model(len(x[0]))
     train_network(model, x, y, filename = filename)
     end_time(start)
 

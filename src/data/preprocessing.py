@@ -59,7 +59,7 @@ def project_path():
     return project_folder
 
 # Plot histograms of the data. 
-def plot(data, filename):
+def plot(data, filename, fold_change):
    
     columns = [
         ('fold_change', 'Fold Change', np.linspace(0, 20, 101)),
@@ -77,6 +77,8 @@ def plot(data, filename):
 
     with PdfPages(filename) as pdf: 
         for column in columns:
+            if (not fold_change) and (column[0] == 'fold_change'):
+                continue
             index = column[0]
             name = column[1]
             bins = column[2]
@@ -222,7 +224,7 @@ def main():
     else:
         filename = os.path.join(reports_folder, 'histograms.pdf')
 
-    plot(ipd, filename)
+    plot(ipd, filename, arguments.fold_change)
     end_time(start)
 
     # Normalize ipd and output to HDF file. 
@@ -232,9 +234,9 @@ def main():
     data_folder = os.path.join(project_folder, 'data')
     interm_folder = os.path.join(data_folder, 'interm')
     if arguments.prefix:
-        filename = os.path.join(interm_folder, f'{arguments.prefix}_merged_data.h5')
+        filename = os.path.join(interm_folder, f'{arguments.prefix}_data.h5')
     else:
-        filename = os.path.join(interm_folder, 'merged_data.h5')
+        filename = os.path.join(interm_folder, 'data.h5')
 
     ipd.to_hdf(filename, 'data', format = 'table')
     end_time(start)

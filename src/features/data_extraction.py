@@ -90,7 +90,7 @@ def windows(index, data, window, columns):
             for column in columns:
                 feature_vector[column] = []
 
-            coordinates = range(lower_bound, upper_bound)
+            coordinates = list(range(lower_bound, upper_bound))
             for j in coordinates:
                 selection =  data.loc[chromosome, j]
                 for column in columns:
