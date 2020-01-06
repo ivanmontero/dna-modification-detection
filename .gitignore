@@ -4,6 +4,8 @@ data/interm/*
 !data/interm/.gitkeep
 data/processed/*
 !data/processed/.gitkeep
+models/*
+!models/.gitkeep
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
