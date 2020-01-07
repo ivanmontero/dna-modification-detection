@@ -1,6 +1,11 @@
-data/
-models/
-.DS_Store
+data/raw/*
+!data/raw/.gitkeep
+data/interm/*
+!data/interm/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+models/*
+!models/.gitkeep
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

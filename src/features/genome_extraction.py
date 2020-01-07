@@ -2,19 +2,15 @@ import data_extraction
 import pandas as pd
 import numpy as np
 import json
-import time
 import os
 
 def main():
-    total_start = time.time()
+    total_start = data_extraction.start_time()
     arguments = data_extraction.setup()
 
-    print ('Reading data.')
-    start = time.time()
-    data = pd.read_hdf(arguments.infile)
-    data = data[['fold_change'] + arguments.columns]
-    elapsed = time.time() - start
-    print (f'{elapsed:.0f} seconds elapsed.')
+    start = data_extraction.start_time('Reading data.')
+    data = pd.read_hdf(arguments.infile, columns = ['fold_change'] + arguments.columns)
+    data_extraction.end_time(start)
 
     print ('Filtering data.')
     ipd = arguments.ipd
@@ -31,14 +27,12 @@ def main():
     true_negative = data_extraction.sample(true_negative, arguments.examples)
     false_negative = data_extraction.sample(false_negative, arguments.examples)
 
-    print ('Extracting windows.')
-    start = time.time()
+    start = data_extraction.start_time('Extracting windows.')
     true_positive_features, true_positive_positions = data_extraction.windows(true_positive, data, arguments.window, arguments.columns)
     false_negative_features, false_negative_positions = data_extraction.windows(false_negative, data, arguments.window, arguments.columns)
     true_negative_features, true_negative_positions = data_extraction.windows(true_negative, data, arguments.window, arguments.columns)
     false_positive_features, false_positive_positions = data_extraction.windows(false_positive, data, arguments.window, arguments.columns)
-    elapsed = time.time() - start
-    print (f'{elapsed:.0f} seconds elapsed.')
+    data_extraction.end_time(start)
 
     print ('Creating labels.')
     features = np.vstack([true_positive_features,
@@ -56,21 +50,35 @@ def main():
                         np.zeros(len(true_negative_features)),
                         np.zeros(len(false_positive_features))])
 
-    directory = os.path.dirname(arguments.infile)
+    project_folder = data_extraction.project_path()
+    data_folder = os.path.join(project_folder, 'data')
+    processed_folder = os.path.join(data_folder, 'processed')
+    interm_folder = os.path.join(data_folder, 'interm')
+
+    column_labels = []
+    for column in arguments.columns:
+        column_labels += [column] * arguments.window
+
     if arguments.save_classes:
-        classes = ['tp'] * len(true_positive_features) + \
-                  ['fn'] * len(false_negative_features) + \
-                  ['tn'] * len(true_negative_features) + \
-                  ['fp'] * len(false_positive_features)
+        print ('Saving Classes')
+        classes = [0] * len(true_positive_features) + \
+                  [1] * len(false_negative_features) + \
+                  [2] * len(true_negative_features) + \
+                  [3] * len(false_positive_features)
 
-        data = {'vectors': features.tolist(), 
+        data = {'classes': {0: 'True Positive', 
+                            1: 'False Negative',
+                            2: 'True Negative',
+                            3: 'False Positive'},
+                'columns': column_labels,
+                'vectors': features.tolist(), 
                 'positions': positions.tolist(), 
-                'classes': classes}
+                'labels': classes}
 
-        if arguments.output:
-            filename = os.path.join(directory, f'{arguments.output}_classes.json')
+        if arguments.prefix:
+            filename = os.path.join(interm_folder, f'{arguments.prefix}_classes.json')
         else:
-            filename = os.path.join(directory, 'classes.json')
+            filename = os.path.join(interm_folder, 'classes.json')
 
         with open(filename, 'w') as outfile:
             json.dump(data, outfile, indent = 4)
@@ -80,37 +88,37 @@ def main():
         tn_seqeunces = data_extraction.create_fasta(true_negative_features, arguments.window)
         fp_seqeunces = data_extraction.create_fasta(false_positive_features, arguments.window)
 
-        if arguments.output:        
-            filename = os.path.join(directory, f'{arguments.output}_tp.fasta')
+        if arguments.prefix:        
+            filename = os.path.join(interm_folder, f'{arguments.prefix}_tp.fasta')
             with open(filename, 'w') as outfile:
                 outfile.write(tp_seqeunces)
 
-            filename = os.path.join(directory, f'{arguments.output}_fn.fasta')
+            filename = os.path.join(interm_folder, f'{arguments.prefix}_fn.fasta')
             with open(filename, 'w') as outfile:
                 outfile.write(fn_seqeunces)
 
-            filename = os.path.join(directory, f'{arguments.output}_tn.fasta')
+            filename = os.path.join(interm_folder, f'{arguments.prefix}_tn.fasta')
             with open(filename, 'w') as outfile:
                 outfile.write(tn_seqeunces)
 
-            filename = os.path.join(directory, f'{arguments.output}_fp.fasta')
+            filename = os.path.join(interm_folder, f'{arguments.prefix}_fp.fasta')
             with open(filename, 'w') as outfile:
                 outfile.write(fp_seqeunces)
 
         else:
-            filename = os.path.join(directory, 'tp.fasta')
+            filename = os.path.join(interm_folder, 'tp.fasta')
             with open(filename, 'w') as outfile:
                 outfile.write(tp_seqeunces)
 
-            filename = os.path.join(directory, 'fn.fasta')
+            filename = os.path.join(interm_folder, 'fn.fasta')
             with open(filename, 'w') as outfile:
                 outfile.write(fn_seqeunces)
 
-            filename = os.path.join(directory, 'tn.fasta')
+            filename = os.path.join(interm_folder, 'tn.fasta')
             with open(filename, 'w') as outfile:
                 outfile.write(tn_seqeunces)
 
-            filename = os.path.join(directory, 'fp.fasta')
+            filename = os.path.join(interm_folder, 'fp.fasta')
             with open(filename, 'w') as outfile:
                 outfile.write(fp_seqeunces)
 
@@ -119,26 +127,22 @@ def main():
     positions = positions[index]
     labels = labels[index]
 
-    column_labels = []
-    for column in arguments.columns:
-        column_labels += [column] * arguments.window
-
     print ('Writing output.')
     data = {'columns': column_labels,
             'vectors': features.tolist(), 
             'positions': positions.tolist(), 
             'labels': labels.tolist()}
 
-    if arguments.output:
-        filename = os.path.join(directory, f'{arguments.output}.json')
+    if arguments.prefix:
+        filename = os.path.join(processed_folder, f'{arguments.prefix}_data.json')
     else:
-        filename = os.path.join(directory, 'data.json')
+        filename = os.path.join(processed_folder, 'data.json')
 
     with open(filename, 'w') as outfile:
         json.dump(data, outfile, indent = 4)
 
-    elapsed = time.time() - total_start
-    print (f'{elapsed:.0f} seconds elapsed in total.')
+    total_time = data_extraction.end_time(total_start, True)
+    print (f'{total_time} elapsed in total.')
 
 if __name__ == '__main__':
     main()

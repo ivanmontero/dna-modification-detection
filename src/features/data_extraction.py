@@ -1,5 +1,7 @@
 import numpy as np
 import argparse
+import time
+import os
 
 # Return argparse arguments. 
 def setup():
@@ -7,7 +9,7 @@ def setup():
         description = 'Create a numpy objects with a set of feature vectors.', 
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
-    parser.version = 0.2
+    parser.version = 0.3
 
     parser.add_argument(
         '-i', 
@@ -58,10 +60,10 @@ def setup():
         help = argparse.SUPPRESS)
 
     parser.add_argument(
-        '-o', 
-        '--output', 
-        default = None,
-        help = 'Output file. Default auto-generates name.')
+        '-p', 
+        '--prefix', 
+        default = False,
+        help = 'Output prefix.')
     
     return parser.parse_args()
 
@@ -88,7 +90,7 @@ def windows(index, data, window, columns):
             for column in columns:
                 feature_vector[column] = []
 
-            coordinates = range(lower_bound, upper_bound)
+            coordinates = list(range(lower_bound, upper_bound))
             for j in coordinates:
                 selection =  data.loc[chromosome, j]
                 for column in columns:
@@ -138,6 +140,29 @@ def create_fasta(vectors, window):
 
     return output
 
+# Start the timer. 
+def start_time(string = None):
+    if string:
+        print (string)
+    return time.time()
 
+# End the timer. 
+def end_time(start, stop = False):
+    seconds = time.time() - start
+    hours, seconds =  seconds // 3600, seconds % 3600
+    minutes, seconds = seconds // 60, seconds % 60
+    string = f'{hours:02.0f}:{minutes:02.0f}:{seconds:02.0f}'
+    if stop:
+        return string
+    print (f'{string} elapsed.')
+
+# Get path to project directory.
+def project_path():
+    script_path = os.path.abspath(__file__)
+    script_folder = os.path.dirname(script_path)
+    src_folder = os.path.dirname(script_folder)
+    project_folder = os.path.dirname(src_folder)
+    
+    return project_folder
 
 
