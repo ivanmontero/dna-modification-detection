@@ -5,6 +5,7 @@ data/interm/*
 data/processed/*
 !data/processed/.gitkeep
 models/*
+data/legacy/*
 !models/.gitkeep
 
 # Byte-compiled / optimized / DLL files
@@ -63,3 +64,7 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+
+# OSX
+.DS_Store
+
