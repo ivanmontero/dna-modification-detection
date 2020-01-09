@@ -4,6 +4,7 @@ import numpy as np
 import json
 import os
 
+# Data extraction from the genome file.
 def main():
     total_start = data_extraction.start_time()
     arguments = data_extraction.setup()

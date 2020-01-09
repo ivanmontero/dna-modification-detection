@@ -39,7 +39,7 @@ def start_time(string = None):
         print (string)
     return time.time()
 
-# End the timer. 
+# Print out the elapsed time from the starting time.
 def end_time(start, stop = False):
     seconds = time.time() - start
     hours, seconds =  seconds // 3600, seconds % 3600
@@ -61,6 +61,7 @@ def project_path():
 # Plot histograms of the data. 
 def plot(data, filename, fold_change):
    
+    # The mapping of the relevant columns to their title and domain to plot over
     columns = [
         ('fold_change', 'Fold Change', np.linspace(0, 20, 101)),
         ('top_ipd', 'Top IPD', np.linspace(0, 5, 101)),
@@ -75,6 +76,7 @@ def plot(data, filename, fold_change):
         ('bottom_error', 'Bottom Error', np.linspace(0, 2, 101))
     ]
 
+    # Create plots and save them to a pdf file.
     with PdfPages(filename) as pdf: 
         for column in columns:
             if (not fold_change) and (column[0] == 'fold_change'):
@@ -93,6 +95,7 @@ def plot(data, filename, fold_change):
 # Mean and standard deviation normalization of the data. 
 def normalize(data):
 
+    # The relevant data columns in the resulting table.
     columns = [
         'top_ipd',
         'bottom_ipd',
@@ -137,7 +140,7 @@ def main():
     start = start_time('Reading IPD file.')
     ipd = pd.read_csv(
         arguments.ipd, 
-        usecols = [
+        usecols = [  # Relevant column names in the IPD file
             'ref_name',
             'index',
             'base',
@@ -153,7 +156,7 @@ def main():
             'base': 'category'
         })
     ipd.rename(
-        columns = {
+        columns = {  # Rename columns to maintain consistency.
             'ref_name': 'chromosome', 
             'index': 'position',
         },

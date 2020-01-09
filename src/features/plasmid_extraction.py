@@ -5,6 +5,7 @@ import json
 import time
 import os
 
+# Data extraction from the plasmid data.
 def main():
     total_start = data_extraction.start_time()
     arguments = data_extraction.setup()

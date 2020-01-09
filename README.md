@@ -14,16 +14,18 @@ data/
 - raw/
     * The raw data that is used to produce processed versions
 
-graphs/
-- Contains graphs produced from files
+reports/
+- Contains figures and PDFs of results obtained through our experiments.
 
 src/
 - classification/
     * Contains all the code related to classification
 - data/
     * Contains all the code related to data manipulation/processing
-- visualization/
+- features/
     * Contains all the code related to visualization.
+- models/
+    * Contains all the code related to training and predicting with a model.
 
 ## Requirements
 * numpy

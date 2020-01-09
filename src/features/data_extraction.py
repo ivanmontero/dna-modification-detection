@@ -67,12 +67,16 @@ def setup():
     
     return parser.parse_args()
 
+# Does a random sample of size "examples" from data. If the length of the data
+# is less than the length of "examples", then the entirety of data is returned.
 def sample(data, examples):
     if len(data) <= examples:
         return data.index.values
     else:
         return data.sample(examples).index.values
 
+# Produces windows of size (window//2)+1 by sliding a windows of that size
+# through the data, with the corresponding columns as features in each window.
 def windows(index, data, window, columns):
     radius = int(window/2)
     features = []

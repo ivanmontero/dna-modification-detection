@@ -4,6 +4,7 @@ import numpy as np
 import json
 import os
 
+# Genome data extraction from solely the ChIP information.
 def main():
     arguments = data_extraction.setup()
 

@@ -6,6 +6,7 @@ data/processed/*
 !data/processed/.gitkeep
 models/*
 data/legacy/*
+!data/legacy/.gitkeep
 !models/.gitkeep
 
 # Byte-compiled / optimized / DLL files
