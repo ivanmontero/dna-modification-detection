@@ -5,6 +5,7 @@ import json
 import os
 
 # Genome data extraction from solely the ChIP information.
+# TODO: Populate JSON file with the arguments
 def main():
     arguments = data_extraction.setup()
 

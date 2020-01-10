@@ -52,10 +52,10 @@ def load(filename):
     return np.array(data), np.array(positions)
 
 def feature_importance(vector, prediction, model):
-    features = np.zeros(50)
+    features = np.zeros(50) # TODO: Make generic, so that window size is an option
     alternate = []
 
-    for i in range(50):
+    for i in range(50): # Assumes a window size, and that the bases appear at the beginning
         a = i
         t = i + 50
         c = i + 100
@@ -66,7 +66,7 @@ def feature_importance(vector, prediction, model):
         new = 0
         for j in range(1,4):
             current[[a,t,c,g]] = np.roll(embedding, j)
-            alternate.append(current)
+            alternate.append(current.copy())
 
     alternate = np.array(alternate)
     new_predictions = model.predict(alternate, batch_size = len(alternate))
