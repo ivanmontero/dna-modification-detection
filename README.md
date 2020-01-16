@@ -28,11 +28,8 @@ src/
     * Contains all the code related to training and predicting with a model.
 
 ## Requirements
-* numpy
-* pandas
-* tensorflow
-* scikit-learn
 * matplotlib
-* xgboost
-* keras
-* scipy
+* pandas
+* numpy
+* tables
+* tensorflow
