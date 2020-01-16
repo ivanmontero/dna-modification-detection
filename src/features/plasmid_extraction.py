@@ -20,7 +20,7 @@ def main():
         data = data[data['chromosome'].isin(arguments.include)]
 
     start = data_extraction.start_time('Extracting windows.')
-    features, positions = data_extraction.windows(data.index.values, data, arguments.window, arguments.columns)
+    features, positions, chromosomes = data_extraction.windows(data.index.values, data, arguments.window, arguments.columns)
     data_extraction.end_time(start)
 
     column_labels = []
@@ -32,6 +32,7 @@ def main():
         'columns': column_labels,
         'vectors': features, 
         'positions': positions,
+        'chromosomes': chromosomes,
         'arguments': vars(arguments)}
 
     project_folder = data_extraction.project_path()

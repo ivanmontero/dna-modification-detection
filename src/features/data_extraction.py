@@ -95,6 +95,7 @@ def windows(index, data, window, columns):
     radius = int(window/2)
     features = []
     positions = []
+    chromosomes = []
 
     k = 0
     for i in range(len(index)):
@@ -121,6 +122,8 @@ def windows(index, data, window, columns):
 
             positions.append(coordinates) 
 
+            chromosomes.append(chromosome)
+
         except TypeError:
             k += 1
             
@@ -128,7 +131,7 @@ def windows(index, data, window, columns):
             print (f'{i} examples created.')
 
     print (f'Skipped {k} examples because of missing values.')
-    return features, positions
+    return features, positions, chromosomes
 
 # Only works if the first four columns are one-hot encodes of top strand 
 # sequence. (Default) 

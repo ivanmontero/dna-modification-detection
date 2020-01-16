@@ -53,7 +53,7 @@ def load(filename):
     return np.array(data), np.array(positions), feature_args
 
 def feature_importance(vector, prediction, model, feature_args):
-    features = np.zeros(feature_args['window']) # TODO: Make generic, so that window size is an option
+    features = np.zeros(feature_args['window'])
     alternate = []
 
     a_start = feature_args['columns'].index('top_A') * feature_args['window']
