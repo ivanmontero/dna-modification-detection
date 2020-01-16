@@ -132,7 +132,8 @@ def main():
     data = {'columns': column_labels,
             'vectors': features.tolist(), 
             'positions': positions.tolist(), 
-            'labels': labels.tolist()}
+            'labels': labels.tolist(),
+            'arguments': vars(arguments)}
 
     if arguments.prefix:
         filename = os.path.join(processed_folder, f'{arguments.prefix}_data.json')

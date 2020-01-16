@@ -26,8 +26,8 @@ def main():
     data = {
         'columns': column_labels,
         'vectors': features, 
-        'positions': positions
-    }
+        'positions': positions,
+        'arguments': vars(arguments)}
 
     project_folder = data_extraction.project_path()
     data_folder = os.path.join(project_folder, 'data')

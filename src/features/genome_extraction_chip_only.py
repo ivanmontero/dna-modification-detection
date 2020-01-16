@@ -46,7 +46,8 @@ def main():
     data = {'columns': column_labels,
             'vectors': features.tolist(), 
             'positions': positions.tolist(), 
-            'labels': labels.tolist()}
+            'labels': labels.tolist(),
+            'arguments': vars(arguments)}
 
     project_folder = data_extraction.project_path()
     data_folder = os.path.join(project_folder, 'data')

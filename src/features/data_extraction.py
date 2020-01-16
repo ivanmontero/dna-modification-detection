@@ -20,7 +20,7 @@ def setup():
     parser.add_argument(
         '-w', 
         '--window', 
-        default = 50, # TODO: Make odd for future uses
+        default = 51,
         type = int, 
         help = 'The size of the window used for predictions.')
 
