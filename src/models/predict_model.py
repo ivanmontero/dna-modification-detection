@@ -16,7 +16,7 @@ def setup():
         '-i', 
         '--input', 
         required = True,
-        help = 'Input filename for predictions.')
+        help = 'Input extracted feature vectors file to predict on.')
 
     parser.add_argument(
         '-m', 
@@ -42,7 +42,7 @@ def end_time(start, stop = False):
         return string
     print (f'{string} elapsed.')
 
-
+# Loads the extracted features file, and relevant data.
 def load(filename):
     with open(filename) as infile:
         contents = json.load(infile)
@@ -52,6 +52,10 @@ def load(filename):
 
     return np.array(data), np.array(positions), feature_args
 
+# Determines the most important bases in determining the model's confidence in the
+# window classification. Goes to each base in the window, and runs the classifier
+# with each changed to a different base. Returns the additive probability drop on
+# each base.
 def feature_importance(vector, prediction, model, feature_args):
     features = np.zeros(feature_args['window'])
     alternate = []
@@ -95,6 +99,7 @@ def main():
         prediction = predictions[i]
         plasmid[window] -= feature_importance(vector, prediction, model, feature_args)
 
+    # TODO: Visualize with ipd values, fold change values (if applicable), etc.
     plt.figure(figsize = (8,4), dpi = 100)
     plt.plot(plasmid[4000:4500])
     plt.savefig('test.png')

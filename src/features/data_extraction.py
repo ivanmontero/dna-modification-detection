@@ -3,7 +3,7 @@ import argparse
 import time
 import os
 
-# Return argparse arguments. 
+# Return argparse arguments for extracting features from the data.
 def setup():
     parser = argparse.ArgumentParser(
         description = 'Create a numpy objects with a set of feature vectors.', 

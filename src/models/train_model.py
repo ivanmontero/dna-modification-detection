@@ -20,7 +20,7 @@ def setup():
         '-i', 
         '--input', 
         required = True,
-        help = 'Input file feature vectors.')
+        help = 'Input extracted feature vectors file to train on.')
 
     parser.add_argument(
         '-p', 
@@ -77,6 +77,7 @@ def create_model(input_dim):
 
     return model
 
+# Begin training the neural network, with optional validation data, and model saving.
 def train_network(model, x_train, y_train, x_test = None, y_test = None, filename = None):
     if x_test is not None:
         history = model.fit(x_train, y_train, validation_data = (x_test, y_test), epochs = 10, verbose = 0)
@@ -115,6 +116,8 @@ def interpolate_curve(x, y, area):
     
     return interpolate_x, mean_y, lower_y, upper_y, mean_area, std_area
     
+# Run k-folds cross validation on the provided data and write the
+# ROC, Accuracy vs. Epoch, and Precision vs. Recall curves.
 def plot(x, y, name, filename):
     fprs = []
     tprs = []
