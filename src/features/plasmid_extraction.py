@@ -14,7 +14,10 @@ def main():
     data = pd.read_hdf(arguments.infile, columns =  arguments.columns)
     data_extraction.end_time(start)
 
-    data = data[~data['chromosome'].isin(arguments.exclude)]
+    if arguments.exclude:
+        data = data[~data['chromosome'].isin(arguments.exclude)]
+    if arguments.include:
+        data = data[data['chromosome'].isin(arguments.include)]
 
     start = data_extraction.start_time('Extracting windows.')
     features, positions = data_extraction.windows(data.index.values, data, arguments.window, arguments.columns)

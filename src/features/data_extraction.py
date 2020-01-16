@@ -66,11 +66,18 @@ def setup():
         help = 'Output prefix.')
 
     parser.add_argument(
-        '-x', 
+        '-excl', 
         '--exclude',
         nargs='+',
         default=[],
-        help = 'List of chromosomes to hold out')
+        help = 'List of chromosomes to exclude processing')
+    
+    parser.add_argument(
+        '-incl', 
+        '--include',
+        nargs='+',
+        default=[],
+        help = 'List of chromosomes to only process')
     
     return parser.parse_args()
 
