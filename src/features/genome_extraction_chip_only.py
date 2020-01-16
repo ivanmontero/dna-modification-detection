@@ -18,6 +18,8 @@ def main():
     positive = data[data['fold_change'] > fold_change]
     negative = data[data['fold_change'] < fold_change]
 
+    data = data[~data['chromosome'].isin(arguments.exclude)]
+
     print ('Sampling data.')
     positive = data_extraction.sample(positive, arguments.examples)
     negative = data_extraction.sample(negative, arguments.examples)

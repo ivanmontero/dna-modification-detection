@@ -17,6 +17,8 @@ def main():
     ipd = arguments.ipd
     fold_change = arguments.fold_change
 
+    data = data[~data['chromosome'].isin(arguments.exclude)]
+
     true_positive = data[((data['top_ipd'] > ipd) | (data['bottom_ipd'] > ipd)) & (data['fold_change'] > fold_change)]
     false_negative = data[(data['top_ipd'] < ipd) & (data['bottom_ipd'] < ipd) & (data['fold_change'] > fold_change)]
     true_negative = data[(data['top_ipd'] < ipd) & (data['bottom_ipd'] < ipd) & (data['fold_change'] < fold_change)]
