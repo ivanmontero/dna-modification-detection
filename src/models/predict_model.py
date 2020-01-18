@@ -79,7 +79,7 @@ def feature_importance(vector, prediction, model, feature_args):
 
     alternate = np.array(alternate)
     new_predictions = model.predict(alternate, batch_size = len(alternate))
-    for i in range(50):
+    for i in range(feature_args['window']):
         features[i] += max(0, prediction - min(new_predictions[i*3:i*3+3]))
 
     return features

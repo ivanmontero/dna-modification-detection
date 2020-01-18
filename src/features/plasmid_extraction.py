@@ -15,9 +15,9 @@ def main():
     data_extraction.end_time(start)
 
     if arguments.exclude:
-        data = data[~data['chromosome'].isin(arguments.exclude)]
+        data = data.drop(arguments.exclude, level='chromosome')
     if arguments.include:
-        data = data[data['chromosome'].isin(arguments.include)]
+        data = data.loc[arguments.include]
 
     start = data_extraction.start_time('Extracting windows.')
     features, positions, chromosomes = data_extraction.windows(data.index.values, data, arguments.window, arguments.columns)

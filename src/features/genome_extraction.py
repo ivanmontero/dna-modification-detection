@@ -18,9 +18,9 @@ def main():
     negative = data[data['fold_change'] < fold_change]
 
     if arguments.exclude:
-        data = data[~data['chromosome'].isin(arguments.exclude)]
+        data = data.drop(arguments.exclude, level='chromosome')
     if arguments.include:
-        data = data[data['chromosome'].isin(arguments.include)]
+        data = data.loc[arguments.include]
 
     print ('Sampling data.')
     positive = data_extraction.sample(positive, arguments.examples)
@@ -48,7 +48,7 @@ def main():
     for column in arguments.columns:
         column_labels += [column] * arguments.window
 
-    print ('Writing output.')\
+    print ('Writing output.')
     data = {'columns': column_labels,
             'vectors': features.tolist(), 
             'positions': positions.tolist(), 
