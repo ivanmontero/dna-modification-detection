@@ -4,6 +4,7 @@ import numpy as np
 import argparse
 import json
 import time
+import tqdm
 
 # Return argparse arguments. 
 def setup():
@@ -92,8 +93,7 @@ def main():
     predictions = model.predict(data)
     plasmid = np.zeros(positions.max() + 1)
 
-    for i in range(len(data)):
-        print (i)
+    for i in tqdm.tqdm(range(len(data))):
         window = positions[i]
         vector = data[i] 
         prediction = predictions[i]

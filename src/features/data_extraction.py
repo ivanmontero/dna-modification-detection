@@ -102,7 +102,7 @@ def windows(index, data, window, columns):
         chromosome = index[i][0]
         position = index[i][1]
         lower_bound = position - radius
-        upper_bound = position + radius 
+        upper_bound = position + radius + 1
 
         try:
             feature_vector = {}
@@ -133,8 +133,6 @@ def windows(index, data, window, columns):
     print (f'Skipped {k} examples because of missing values.')
     return features, positions, chromosomes
 
-# Only works if the first four columns are one-hot encodes of top strand 
-# sequence. (Default) 
 def create_fasta(vectors, window):
     sequences = []
     bases = np.array(['A', 'T', 'C', 'G'])

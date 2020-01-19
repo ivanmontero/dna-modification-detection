@@ -33,3 +33,4 @@ src/
 * numpy
 * tables
 * tensorflow
+* tqdm

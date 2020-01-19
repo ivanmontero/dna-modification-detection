@@ -12,15 +12,15 @@ def main():
     data = pd.read_hdf(arguments.infile, columns = ['fold_change'] + arguments.columns)
     data_extraction.end_time(start)
 
-    print ('Filtering data.')
-    fold_change = arguments.fold_change
-    positive = data[data['fold_change'] > fold_change]
-    negative = data[data['fold_change'] < fold_change]
-
     if arguments.exclude:
         data = data.drop(arguments.exclude, level='chromosome')
     if arguments.include:
         data = data.loc[arguments.include]
+
+    print ('Filtering data.')
+    fold_change = arguments.fold_change
+    positive = data[data['fold_change'] > fold_change]
+    negative = data[data['fold_change'] < fold_change]
 
     print ('Sampling data.')
     positive = data_extraction.sample(positive, arguments.examples)
@@ -35,7 +35,7 @@ def main():
     print ('Creating labels.')
     features = np.vstack([positive_features,negative_features])
     positions = np.vstack([positive_positions,negative_positions])
-    chromosomes = np.vstack([positive_chromosomes,negative_features])
+    chromosomes = np.hstack([positive_chromosomes, negative_chromosomes])
     labels = np.hstack([np.ones(len(positive_features)), np.zeros(len(negative_features))])
 
     index = np.random.permutation(len(features))
