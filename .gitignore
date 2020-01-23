@@ -4,6 +4,8 @@ data/interm/*
 !data/interm/.gitkeep
 data/processed/*
 !data/processed/.gitkeep
+data/test/*
+!data/test/.gitkeep
 models/*
 data/legacy/*
 !data/legacy/.gitkeep

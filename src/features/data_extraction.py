@@ -3,7 +3,7 @@ import argparse
 import time
 import os
 
-# Return argparse arguments. 
+# Return argparse arguments for extracting features from the data.
 def setup():
     parser = argparse.ArgumentParser(
         description = 'Create a numpy objects with a set of feature vectors.', 
@@ -20,7 +20,7 @@ def setup():
     parser.add_argument(
         '-w', 
         '--window', 
-        default = 50, # TODO: Make odd for future uses
+        default = 51,
         type = int, 
         help = 'The size of the window used for predictions.')
 
@@ -64,6 +64,20 @@ def setup():
         '--prefix', 
         default = False,
         help = 'Output prefix.')
+
+    parser.add_argument(
+        '-excl', 
+        '--exclude',
+        nargs='+',
+        default=[],
+        help = 'List of chromosomes to exclude processing')
+    
+    parser.add_argument(
+        '-incl', 
+        '--include',
+        nargs='+',
+        default=[],
+        help = 'List of chromosomes to only process')
     
     return parser.parse_args()
 
@@ -81,13 +95,14 @@ def windows(index, data, window, columns):
     radius = int(window/2)
     features = []
     positions = []
+    chromosomes = []
 
     k = 0
     for i in range(len(index)):
         chromosome = index[i][0]
         position = index[i][1]
         lower_bound = position - radius
-        upper_bound = position + radius 
+        upper_bound = position + radius + 1
 
         try:
             feature_vector = {}
@@ -107,6 +122,8 @@ def windows(index, data, window, columns):
 
             positions.append(coordinates) 
 
+            chromosomes.append(chromosome)
+
         except TypeError:
             k += 1
             
@@ -114,10 +131,8 @@ def windows(index, data, window, columns):
             print (f'{i} examples created.')
 
     print (f'Skipped {k} examples because of missing values.')
-    return features, positions
+    return features, positions, chromosomes
 
-# Only works if the first four columns are one-hot encodes of top strand 
-# sequence. (Default) 
 def create_fasta(vectors, window):
     sequences = []
     bases = np.array(['A', 'T', 'C', 'G'])

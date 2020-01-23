@@ -14,8 +14,13 @@ def main():
     data = pd.read_hdf(arguments.infile, columns =  arguments.columns)
     data_extraction.end_time(start)
 
+    if arguments.exclude:
+        data = data.drop(arguments.exclude, level='chromosome')
+    if arguments.include:
+        data = data.loc[arguments.include]
+
     start = data_extraction.start_time('Extracting windows.')
-    features, positions = data_extraction.windows(data.index.values, data, arguments.window, arguments.columns)
+    features, positions, chromosomes = data_extraction.windows(data.index.values, data, arguments.window, arguments.columns)
     data_extraction.end_time(start)
 
     column_labels = []
@@ -26,8 +31,9 @@ def main():
     data = {
         'columns': column_labels,
         'vectors': features, 
-        'positions': positions
-    }
+        'positions': positions,
+        'chromosomes': chromosomes,
+        'arguments': vars(arguments)}
 
     project_folder = data_extraction.project_path()
     data_folder = os.path.join(project_folder, 'data')
