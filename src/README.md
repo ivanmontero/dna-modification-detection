@@ -12,7 +12,7 @@ models/
 ### Steps
 
 1) Run the preprocessing. This will merge the data from the PacBio run with the data from the ChIP experiment. See test data for expected format. 
-`python src/data/preprocessing.py -i data/raw/test_new_ipd.csv -f data/raw/test_fold_change.csv -p test`
+`python src/data/preprocessing.py -i data/test/test_new_ipd.csv -f data/test/test_fold_change.csv -p test`
 
 2) Generate the feature vectors from windows of genomic information.  
 `python src/features/genome_extraction.py -i data/interm/test_data.h5 -p test`
