@@ -5,6 +5,7 @@ import argparse
 import json
 import time
 import tqdm
+import pandas as pd
 
 # Return argparse arguments. 
 def setup():
@@ -17,13 +18,20 @@ def setup():
         '-i', 
         '--input', 
         required = True,
-        help = 'Input extracted feature vectors file to predict on.')
+        help = 'Input extracted feature vectors json file to predict on.')
 
     parser.add_argument(
         '-m', 
         '--model', 
         required = True,
         help = 'Filename for model.')
+
+    parser.add_argument(
+        '-of',
+        '--original_file',
+        required = True,
+        help = 'Input preprocessed h5 original data file.'
+    )
 
     return parser.parse_args()
 
@@ -43,15 +51,27 @@ def end_time(start, stop = False):
         return string
     print (f'{string} elapsed.')
 
+# Return path to project level. 
+def project_path():
+    script_path = os.path.abspath(__file__)
+    script_folder = os.path.dirname(script_path)
+    src_folder = os.path.dirname(script_folder)
+    project_folder = os.path.dirname(src_folder)
+    
+    return project_folder
+
 # Loads the extracted features file, and relevant data.
-def load(filename):
-    with open(filename) as infile:
-        contents = json.load(infile)
+def load(feature_file, original_file):
+    with open(feature_file) as f:
+        contents = json.load(f)
         data = contents['vectors']
         positions = contents['positions']
+        chromosomes = contents['chromosomes']
         feature_args = contents['arguments']
 
-    return np.array(data), np.array(positions), feature_args
+    original = pd.read_hdf(original_file)
+
+    return np.array(data), np.array(positions), chromosomes, feature_args, original
 
 # Determines the most important bases in determining the model's confidence in the
 # window classification. Goes to each base in the window, and runs the classifier
@@ -81,28 +101,58 @@ def feature_importance(vector, prediction, model, feature_args):
     alternate = np.array(alternate)
     new_predictions = model.predict(alternate, batch_size = len(alternate))
     for i in range(feature_args['window']):
-        features[i] += max(0, prediction - min(new_predictions[i*3:i*3+3]))
+        features[i] = max(0, prediction - min(new_predictions[i*3:i*3+3]))
 
     return features
 
 def main():
     arguments = setup()
     model = keras.models.load_model(arguments.model)
-    data, positions, feature_args = load(arguments.input)
+    data, positions, chromosomes, feature_args, original = load(arguments.input, arguments.original_file)
+
+    original["drop"] = 0
+
+    # index = [(c, p) for c in set(chromosomes) for p in range(positions[np.array(chromosomes) == c].max()+1)]
+
+    # importance = pd.DataFrame(index=pd.MultiIndex.from_tuples(index, names=['chromosome', 'position']), columns=["drop"], dtype=float)
+    # print(importance)
+    # print(importance.loc["LtaP_01", 0])
+
 
     predictions = model.predict(data)
-    plasmid = np.zeros(positions.max() + 1)
+    # plasmid = np.zeros(positions.max() + 1) # Assumes only one chromosome...
+    # TODO: Open merged data, and map between that and the predictions
 
     for i in tqdm.tqdm(range(len(data))):
         window = positions[i]
         vector = data[i] 
+        chromosome = chromosomes[i]
         prediction = predictions[i]
-        plasmid[window] -= feature_importance(vector, prediction, model, feature_args)
+        drops = feature_importance(vector, prediction, model, feature_args)
+        for i, p in enumerate(window):
+            original.loc[(chromosome, p), 'drop'] += drops[i]
 
-    # TODO: Visualize with ipd values, fold change values (if applicable), etc.
-    plt.figure(figsize = (8,4), dpi = 100)
-    plt.plot(plasmid[4000:4500])
-    plt.savefig('test.png')
+    project_folder = data_extraction.project_path()
+    data_folder = os.path.join(project_folder, 'data')
+    processed_folder = os.path.join(data_folder, 'processed')
+    reports_folder = os.path.join(project_folder, 'reports')
+    if arguments.prefix:
+        reports_filename = os.path.join(reports_folder, f'{arguments.prefix}_feature_importance.pdf')
+        predictions_filename = os.path.join(processed_folder, f'{arguments.prefix}_predictions.csv')
+    else:
+        reports_filename = os.path.join(reports_folder, 'feature_importance.pdf')
+        predictions_filename = os.path.join(processed_folder, 'predictions.csv')
+
+    original['drop'].to_csv(predictions_filename)
+
+    with PdfPages(reports_filename) as pdf: 
+        for c in importance.index.get_level_values('chromosome'):
+            pass
+        # # TODO: Visualize with ipd values, fold change values (if applicable), etc.
+        # plt.figure(figsize = (8,4), dpi = 100)
+        # plt.plot(plasmid[4000:4500])
+        # plt.savefig('test.png')
+
 
 if __name__ == '__main__':
     main()
