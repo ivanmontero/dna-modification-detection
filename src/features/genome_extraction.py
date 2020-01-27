@@ -26,9 +26,10 @@ def main():
     positive = data_extraction.sample(positive, arguments.examples)
     negative = data_extraction.sample(negative, arguments.examples)
 
-    start = data_extraction.start_time('Extracting windows.')
+    start = data_extraction.start_time('Extracting windows for positive examples.')
     data = pd.read_hdf(arguments.infile)
     positive_features, positive_positions, positive_chromosomes = data_extraction.windows(positive, data, arguments.window, arguments.columns)
+    print ('Extracting windows for negative examples.')
     negative_features, negative_positions, negative_chromosomes = data_extraction.windows(negative, data, arguments.window, arguments.columns)
     data_extraction.end_time(start)
 
