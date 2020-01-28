@@ -215,6 +215,8 @@ def plot(x, y, name, filename):
         plt.close()
 
 def main():
+    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+    
     total_start = start_time()
     # Get argparse arguments. 
     arguments = setup()

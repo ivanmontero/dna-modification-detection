@@ -1,3 +1,4 @@
+from tqdm import trange
 import numpy as np
 import argparse
 import time
@@ -98,7 +99,7 @@ def windows(index, data, window, columns):
     chromosomes = []
 
     k = 0
-    for i in range(len(index)):
+    for i in trange(len(index)):
         chromosome = index[i][0]
         position = index[i][1]
         lower_bound = position - radius
