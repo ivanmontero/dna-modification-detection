@@ -1,6 +1,8 @@
 from matplotlib import pyplot as plt
 from tensorflow import keras
+from matplotlib.backends.backend_pdf import PdfPages
 import numpy as np
+import os
 import argparse
 import json
 import time
@@ -32,6 +34,12 @@ def setup():
         required = True,
         help = 'Input preprocessed h5 original data file.'
     )
+
+    parser.add_argument(
+        '-p', 
+        '--prefix', 
+        default = False,
+        help = 'Output prefix.')
 
     return parser.parse_args()
 
@@ -132,7 +140,7 @@ def main():
         for i, p in enumerate(window):
             original.loc[(chromosome, p), 'drop'] += drops[i]
 
-    project_folder = data_extraction.project_path()
+    project_folder = project_path()
     data_folder = os.path.join(project_folder, 'data')
     processed_folder = os.path.join(data_folder, 'processed')
     reports_folder = os.path.join(project_folder, 'reports')
@@ -146,7 +154,7 @@ def main():
     original['drop'].to_csv(predictions_filename)
 
     with PdfPages(reports_filename) as pdf: 
-        for c in importance.index.get_level_values('chromosome'):
+        for c in original.index.get_level_values('chromosome'):
             pass
         # # TODO: Visualize with ipd values, fold change values (if applicable), etc.
         # plt.figure(figsize = (8,4), dpi = 100)
