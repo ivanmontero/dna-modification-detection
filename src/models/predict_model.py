@@ -1,11 +1,11 @@
 from matplotlib import pyplot as plt
 from tensorflow import keras
+import pandas as pd
 import numpy as np
 import argparse
 import json
 import time
 import tqdm
-import pandas as pd
 
 # Return argparse arguments. 
 def setup():
@@ -93,7 +93,6 @@ def feature_importance(vector, prediction, model, feature_args):
 
         current = vector.copy()
         embedding = vector[[a,t,c,g]]
-        new = 0
         for j in range(1,4):
             current[[a,t,c,g]] = np.roll(embedding, j)
             alternate.append(current.copy())
