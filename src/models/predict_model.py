@@ -69,7 +69,7 @@ def load(feature_file, original_file):
         chromosomes = contents['chromosomes']
         feature_args = contents['arguments']
 
-    original = pd.read_hdf(original_file)
+    original = pd.read_hdf(original_file).loc[list(set(chromosomes))]
 
     return np.array(data), np.array(positions), chromosomes, feature_args, original
 
