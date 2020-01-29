@@ -155,7 +155,16 @@ def main():
 
     with PdfPages(reports_filename) as pdf: 
         for c in original.index.get_level_values('chromosome'):
-            pass
+            c_data = original.loc[c]
+            c_pos = c_data.index.get_level_values('position')
+            plt.plot(c_pos, c_data["top_ipd"], label="top_ipd")
+            plt.plot(c_pos, c_data["bottom_ipd"], label="bottom_ipd")
+            plt.plot(c_pos, c_data["fold_change"], label="fold_change")
+            plt.plot(c_pos, c_data["drop"], label="drop")
+            plt.legend()
+            plt.tight_layout()
+            pdf.savefig()
+            plt.close()
         # # TODO: Visualize with ipd values, fold change values (if applicable), etc.
         # plt.figure(figsize = (8,4), dpi = 100)
         # plt.plot(plasmid[4000:4500])
