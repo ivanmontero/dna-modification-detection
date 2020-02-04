@@ -41,6 +41,14 @@ def setup():
         default = False,
         help = 'Output prefix.')
 
+    parser.add_argument(
+        '-c',
+        '--center',
+        default=False,
+        action='store_true',
+        help = 'Whether to only predict on the centers'
+    )
+
     return parser.parse_args()
 
 # Start the timer. 
@@ -119,17 +127,7 @@ def main():
     data, positions, chromosomes, feature_args, original = load(arguments.input, arguments.original_file)
 
     original["drop"] = 0
-
-    # index = [(c, p) for c in set(chromosomes) for p in range(positions[np.array(chromosomes) == c].max()+1)]
-
-    # importance = pd.DataFrame(index=pd.MultiIndex.from_tuples(index, names=['chromosome', 'position']), columns=["drop"], dtype=float)
-    # print(importance)
-    # print(importance.loc["LtaP_01", 0])
-
-
     predictions = model.predict(data)
-    # plasmid = np.zeros(positions.max() + 1) # Assumes only one chromosome...
-    # TODO: Open merged data, and map between that and the predictions
 
     for i in tqdm.tqdm(range(len(data))):
         window = positions[i]
@@ -154,22 +152,18 @@ def main():
     original['drop'].to_csv(predictions_filename)
 
     with PdfPages(reports_filename) as pdf: 
-        for c in original.index.get_level_values('chromosome'):
+        for c in set(original.index.get_level_values('chromosome')):
             c_data = original.loc[c]
+            plt.figure(figsize=(50, 10), dpi=1000)
             c_pos = c_data.index.get_level_values('position')
-            plt.plot(c_pos, c_data["top_ipd"], label="top_ipd")
-            plt.plot(c_pos, c_data["bottom_ipd"], label="bottom_ipd")
-            plt.plot(c_pos, c_data["fold_change"], label="fold_change")
-            plt.plot(c_pos, c_data["drop"], label="drop")
+            plt.plot(c_pos, c_data["top_ipd"], label="top_ipd", linewidth=1)
+            plt.plot(c_pos, c_data["bottom_ipd"], label="bottom_ipd", linewidth=1)
+            plt.plot(c_pos, c_data["fold_change"], label="fold_change", linewidth=1)
+            plt.plot(c_pos, c_data["drop"], label="drop", linewidth=1)
             plt.legend()
             plt.tight_layout()
             pdf.savefig()
             plt.close()
-        # # TODO: Visualize with ipd values, fold change values (if applicable), etc.
-        # plt.figure(figsize = (8,4), dpi = 100)
-        # plt.plot(plasmid[4000:4500])
-        # plt.savefig('test.png')
-
 
 if __name__ == '__main__':
     main()

@@ -20,7 +20,7 @@ def main():
         data = data.loc[arguments.include]
 
     start = data_extraction.start_time('Extracting windows.')
-    features, positions, chromosomes = data_extraction.windows(data.index.values, data, arguments.window, arguments.columns)
+    features, positions, chromosomes = data_extraction.windows(data.index.values, data, arguments.window, arguments.columns, center=arguments.center)
     data_extraction.end_time(start)
 
     column_labels = []

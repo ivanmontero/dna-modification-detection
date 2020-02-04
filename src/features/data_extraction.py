@@ -80,6 +80,14 @@ def setup():
         default=[],
         help = 'List of chromosomes to only process')
     
+    parser.add_argument(
+        '-c',
+        '--center',
+        default=False,
+        action='store_true',
+        help = 'Whether to only center on As and Ts'
+    )
+    
     return parser.parse_args()
 
 # Does a random sample of size "examples" from data. If the length of the data
@@ -92,7 +100,7 @@ def sample(data, examples):
 
 # Produces windows of size (window//2)+1 by sliding a windows of that size
 # through the data, with the corresponding columns as features in each window.
-def windows(index, data, window, columns):
+def windows(index, data, window, columns, center=False):
     radius = int(window/2)
     features = []
     positions = []
@@ -111,6 +119,10 @@ def windows(index, data, window, columns):
                 feature_vector[column] = []
 
             coordinates = list(range(lower_bound, upper_bound))
+            center_data = data.loc[chromosome, coordinates[len(coordinates)//2]]
+            if center and (center_data['top_A'] == 0 and center_data['top_T'] == 0):
+                continue
+
             for j in coordinates:
                 selection =  data.loc[chromosome, j]
                 for column in columns:

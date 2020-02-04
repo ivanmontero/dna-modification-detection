@@ -22,15 +22,19 @@ def main():
     positive = data[data['fold_change'] > fold_change]
     negative = data[data['fold_change'] < fold_change]
 
+    # if arguments.center:
+    #     positive = positive[(positive['top_A'] == 1) | (positive['top_T'] == 1)]
+    #     negative = negative[(negative['top_A'] == 1) | (negative['top_T'] == 1)]
+
     print ('Sampling data.')
     positive = data_extraction.sample(positive, arguments.examples)
     negative = data_extraction.sample(negative, arguments.examples)
 
     start = data_extraction.start_time('Extracting windows for positive examples.')
     data = pd.read_hdf(arguments.infile)
-    positive_features, positive_positions, positive_chromosomes = data_extraction.windows(positive, data, arguments.window, arguments.columns)
+    positive_features, positive_positions, positive_chromosomes = data_extraction.windows(positive, data, arguments.window, arguments.columns, center=arguments.center)
     print ('Extracting windows for negative examples.')
-    negative_features, negative_positions, negative_chromosomes = data_extraction.windows(negative, data, arguments.window, arguments.columns)
+    negative_features, negative_positions, negative_chromosomes = data_extraction.windows(negative, data, arguments.window, arguments.columns, center=arguments.center)
     data_extraction.end_time(start)
 
     print ('Creating labels.')
