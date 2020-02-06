@@ -69,21 +69,29 @@ def load(filename):
 # with dropout between the layers.
 def create_model(input_dim):
     model = keras.Sequential()
-    model.add(keras.layers.Dense(
-        300, 
-        input_dim = input_dim, 
-        activation="relu"))
-    model.add(keras.layers.Dropout(0.5))
-    model.add(keras.layers.Dense(
-        150, 
-        activation="relu"))
-    model.add(keras.layers.Dropout(0.5))
-    model.add(keras.layers.Dense(
-        50, 
-        activation="relu"))
-    model.add(keras.layers.Dense(
-        1, 
-        activation="sigmoid"))
+    model.add(
+        keras.layers.Dense(
+            300, 
+            input_dim = input_dim, 
+            activation="relu"))
+    model.add(
+        keras.layers.Dropout(
+            0.5))
+    model.add(
+        keras.layers.Dense(
+            150, 
+            activation="relu"))
+    model.add(
+        keras.layers.Dropout(
+            0.5))
+    model.add(
+        keras.layers.Dense(
+            50, 
+            activation="relu"))
+    model.add(
+        keras.layers.Dense(
+            1, 
+            activation="sigmoid"))
     model.compile(
         optimizer="adam", 
         loss="binary_crossentropy", 
