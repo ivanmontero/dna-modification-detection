@@ -1,6 +1,10 @@
 from matplotlib import pyplot as plt
 from tensorflow import keras
 from matplotlib.backends.backend_pdf import PdfPages
+import sys
+
+sys.path.append('../utils/')
+
 import numpy as np
 import os
 import argparse
@@ -8,6 +12,9 @@ import json
 import time
 import tqdm
 import pandas as pd
+
+PEAKS_TO_VISUALIZE = 10
+WINDOW_AROUND_PEAK = 1000
 
 # Return argparse arguments. 
 def setup():
@@ -154,16 +161,20 @@ def main():
     with PdfPages(reports_filename) as pdf: 
         for c in set(original.index.get_level_values('chromosome')):
             c_data = original.loc[c]
-            plt.figure(figsize=(50, 10), dpi=1000)
-            c_pos = c_data.index.get_level_values('position')
-            plt.plot(c_pos, c_data["top_ipd"], label="top_ipd", linewidth=1)
-            plt.plot(c_pos, c_data["bottom_ipd"], label="bottom_ipd", linewidth=1)
-            plt.plot(c_pos, c_data["fold_change"], label="fold_change", linewidth=1)
-            plt.plot(c_pos, c_data["drop"], label="drop", linewidth=1)
-            plt.legend()
-            plt.tight_layout()
-            pdf.savefig()
-            plt.close()
+            largest_rows = c_data.nlargest(PEAKS_TO_VISUALIZE, 'drop')
+
+            for index, row in largest_rows.iterrows():
+                iloc = c_data.index.get_loc(row.name)
+                window = c_data.iloc[iloc - WINDOW_AROUND_PEAK: iloc + WINDOW_AROUND_PEAK + 1]
+                c_pos = window.index.get_level_values('position')
+                plt.plot(c_pos, window["top_ipd"], label="top_ipd", linewidth=1)
+                plt.plot(c_pos, window["bottom_ipd"], label="bottom_ipd", linewidth=1)
+                plt.plot(c_pos, window["fold_change"], label="fold_change", linewidth=1)
+                plt.plot(c_pos, window["drop"], label="drop", linewidth=1)
+                plt.legend()
+                plt.tight_layout()
+                pdf.savefig()
+                plt.close()
 
 if __name__ == '__main__':
     main()
