@@ -6,12 +6,14 @@ import argparse
 import time
 import os
 
+from ..utils import utils
+
 # Return argparse arguments. 
 def setup():
     parser = argparse.ArgumentParser(
         description = 'Create a HDF file with a set of peaks.')
 
-    parser.version = 0.4
+    parser.version = 0.5
 
     parser.add_argument(
         '-i', 
@@ -32,31 +34,6 @@ def setup():
         help = 'Output prefix.')
 
     return parser.parse_args()
-
-# Start the timer. 
-def start_time(string = None):
-    if string:
-        print (string)
-    return time.time()
-
-# Print out the elapsed time from the starting time.
-def end_time(start, stop = False):
-    seconds = time.time() - start
-    hours, seconds =  seconds // 3600, seconds % 3600
-    minutes, seconds = seconds // 60, seconds % 60
-    string = f'{hours:02.0f}:{minutes:02.0f}:{seconds:02.0f}'
-    if stop:
-        return string
-    print (f'{string} elapsed.')
-
-# Return path to project level. 
-def project_path():
-    script_path = os.path.abspath(__file__)
-    script_folder = os.path.dirname(script_path)
-    src_folder = os.path.dirname(script_folder)
-    project_folder = os.path.dirname(src_folder)
-    
-    return project_folder
 
 # Plot histograms of the data. 
 def plot(data, filename, fold_change):
@@ -115,13 +92,13 @@ def normalize(data):
     return data
 
 def main():
-    total_start = start_time()
+    total_start = utils.start_time()
     # Get argparse arguments. 
     arguments = setup()
     
     # If there is ChIP data: 
     if arguments.fold_change:
-        start = start_time('Reading fold change file.')
+        start = utils.start_time('Reading fold change file.')
         fold_change = pd.read_csv(
             arguments.fold_change,
             dtype = {
@@ -134,10 +111,10 @@ def main():
             'position'
             ], 
             inplace = True)
-        end_time(start)
+        utils.end_time(start)
 
     # Load the IPD data. 
-    start = start_time('Reading IPD file.')
+    start = utils.start_time('Reading IPD file.')
     ipd = pd.read_csv(
         arguments.ipd, 
         usecols = [  # Relevant column names in the IPD file
@@ -194,10 +171,10 @@ def main():
             'case_coverage': 'bottom_coverage'
         },
         inplace = True)
-    end_time(start)
+    utils.end_time(start)
 
     # Encode bases. 
-    start = start_time('Encoding bases.')
+    start = utils.start_time('Encoding bases.')
     top_encoding = pd.get_dummies(top_strand['top_base'], prefix = 'top')
     bottom_encoding = pd.get_dummies(bottom_strand['bottom_base'], prefix = 'bottom')
 
@@ -208,18 +185,18 @@ def main():
     # Drop base column.
     top_strand = top_strand.drop(columns = 'top_base')
     bottom_strand = bottom_strand.drop(columns = 'bottom_base')
-    end_time(start)
+    utils.end_time(start)
 
     # Merge the top strand and bottom strand and ChIP if present. 
-    start = start_time('Merging files.')
+    start = utils.start_time('Merging files.')
     ipd = pd.merge(top_strand, bottom_strand, on = ['chromosome', 'position'])
     if arguments.fold_change:
         ipd = pd.merge(ipd, fold_change, on = ['chromosome', 'position'])
-    end_time(start)
+    utils.end_time(start)
 
     # Plot the histograms of each feature. 
-    start = start_time('Plotting histograms.')
-    project_folder = project_path()
+    start = utils.start_time('Plotting histograms.')
+    project_folder = utils.project_path()
     reports_folder = os.path.join(project_folder, 'reports')
 
     if arguments.prefix:
@@ -228,10 +205,10 @@ def main():
         filename = os.path.join(reports_folder, 'histograms.pdf')
 
     plot(ipd, filename, arguments.fold_change)
-    end_time(start)
+    utils.end_time(start)
 
     # Normalize ipd and output to HDF file. 
-    start = start_time('Writing output.')
+    start = utils.start_time('Writing output.')
     ipd = normalize(ipd).round(4)
 
     data_folder = os.path.join(project_folder, 'data')
@@ -242,8 +219,8 @@ def main():
         filename = os.path.join(interm_folder, 'data.h5')
 
     ipd.to_hdf(filename, 'data', format = 'table')
-    end_time(start)
-    total_time = end_time(total_start, True)
+    utils.end_time(start)
+    total_time = utils.end_time(total_start, True)
     print (f'{total_time} elapsed in total.')
 
 if __name__ == '__main__':
