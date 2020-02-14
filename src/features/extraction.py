@@ -140,10 +140,10 @@ def main():
     data = pd.read_hdf(arguments.infile)
     chunks = chunking(data[arguments.columns], arguments.window)
 
-    utils.start_time('Extracting Windows')
+    start = utils.start_time('Extracting Windows')
     with multiprocessing.Pool() as pool:
         results = pool.starmap(windows, chunks)
-    utils.end_time()
+    utils.end_time(start)
     
     print ('Writing output.')
     data = combine(data, results, arguments.window)
