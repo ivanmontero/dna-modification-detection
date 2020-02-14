@@ -3,6 +3,13 @@ from tqdm import tqdm
 import pandas as pd
 import argparse
 import time
+import json
+
+# Add Helper Functions
+import sys
+import os
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'utils'))
+import utils
 
 # Return argparse arguments for extracting features from the data.
 def setup():
@@ -36,57 +43,10 @@ def setup():
         help = 'List of columns to include as features.')
 
     parser.add_argument(
-        '--ipd',
-        default = 2,
-        type = float,
-        help = 'IPD threshold value.')
-
-    parser.add_argument(
-        '--fold-change',
-        default = 10,
-        type = float, 
-        help = 'Fold change threshold value.')
-
-    parser.add_argument(
-        '-e',
-        '--examples',
-        default = 1000,
-        type = int,
-        help = 'Max number of examples from each class.')
-
-    parser.add_argument(
-        '--save-classes',
-        action='store_true',
-        default = False,
-        help = argparse.SUPPRESS)
-
-    parser.add_argument(
         '-p', 
         '--prefix', 
         default = False,
         help = 'Output prefix.')
-
-    parser.add_argument(
-        '-excl', 
-        '--exclude',
-        nargs='+',
-        default=[],
-        help = 'List of chromosomes to exclude processing')
-    
-    parser.add_argument(
-        '-incl', 
-        '--include',
-        nargs='+',
-        default=[],
-        help = 'List of chromosomes to only process')
-    
-    parser.add_argument(
-        '-c',
-        '--center',
-        default=False,
-        action='store_true',
-        help = 'Whether to only center on As and Ts'
-    )
     
     return parser.parse_args()
 
@@ -118,38 +78,34 @@ def project_path():
 def windows(data, window, progress):
     radius = int((window - 1)/2)
 
-    chromosomes = {}
-    for name in set(data.index.get_level_values('chromosome')):
-        chromosomes[name] = data.xs(name, drop_level = False)
-
     if progress:
         bar = tqdm(total = len(data))
-    dataframes = []
-    for name in chromosomes:
-        dataset = chromosomes[name]
 
-        vectors = []
-        for j in range(len(dataset.index)):
-            start = j - radius
-            end = j + radius + 1
-            section = dataset.iloc[start:end]
+    vectors = [None]*len(data.index)
+    for j in range(radius, len(data.index) - radius - 1):
+        start = j - radius
+        end = j + radius + 1
+        section = data.iloc[start:end]
 
-            if len(section) < window:
-                vector = None
-            else:
-                vector = section.to_numpy().flatten(order = 'F')
-            vectors.append(vector)
+        start_position = data.index[start][1]
+        end_position = data.index[end][1]
 
-            if progress:
-                bar.update()
+        # Checks if rows are contiguous.
+        if (abs(end_position - start_position) > window):
+        	continue
+   
+        vector = section.to_numpy().flatten(order = 'F')
+        vectors[j] = vector
 
-        vectors = pd.DataFrame({'vectors': vectors}, index = dataset.index)
-        dataframes.append(vectors)
+        if progress:
+            bar.update()
+
+    vectors = pd.DataFrame({'vectors': vectors}, index = data.index)
 
     if progress:
         bar.close()
 
-    return pd.concat(dataframes)
+    return vectors
 
 def chunking(data, window):
     radius = int((window - 1)/2)
@@ -166,28 +122,56 @@ def chunking(data, window):
     chunks[0][2] = True
     return chunks
 
-def combine(data, results):
-    for chunk in results:
-        data = data.combine_first(chunk)
+def combine(data, results, window):
+    radius = int((window - 1)/2)
+    combined_results = results[0].iloc[:-(radius + 1)]
 
-    return data
+    for i in range(1, len(results) - 1):
+        trimmed = results[i].iloc[radius:-(radius + 1)]
+        combined_results = pd.concat([combined_results, trimmed])
+
+    trimmed = results[-1].iloc[radius:]
+    combined_results = pd.concat([combined_results, trimmed])
+
+    return pd.concat([data, combined_results], axis = 1)
 
 def main():
     arguments = setup()
     data = pd.read_hdf(arguments.infile)
     chunks = chunking(data[arguments.columns], arguments.window)
 
-    start = time.time()
+    utils.start_time('Extracting Windows')
     with multiprocessing.Pool() as pool:
         results = pool.starmap(windows, chunks)
-    end = time.time()
-    print(f'Multiprocessing: {end - start}')
+    utils.end_time()
     
-    start = time.time()
-    data = combine(data, results)
-    end = time.time()
-    print(f'Join: {end - start}')
+    print ('Writing output.')
+    data = combine(data, results, arguments.window)
 
+    project_folder = utils.project_path()
+    data_folder = os.path.join(project_folder, 'data')
+    processed_folder = os.path.join(data_folder, 'processed')
+    if arguments.prefix:
+        filename = os.path.join(processed_folder, f'{arguments.prefix}_data.h5')
+    else:
+        filename = os.path.join(processed_folder, 'data.h5')
+
+    data.to_hdf(filename, 'data', format = 'table')
+
+    column_labels = []
+    for column in arguments.columns:
+        column_labels += [column] * arguments.window
+
+    metadata = {'columns': column_labels,
+            'arguments': vars(arguments)}
+
+    if arguments.prefix:
+        filename = os.path.join(processed_folder, f'{arguments.prefix}_metadata.json')
+    else:
+        filename = os.path.join(processed_folder, 'metadata.json')
+
+    with open(filename, 'w') as outfile:
+        json.dump(metadata, outfile, indent = 4)
 
 if __name__ == '__main__':
     main()
