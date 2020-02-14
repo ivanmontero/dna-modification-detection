@@ -8,7 +8,12 @@ import tqdm.keras
 import argparse
 import json
 import time
+
 import os
+import sys
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'utils'))
+
+import utils
 
 # Return argparse arguments. 
 def setup():
@@ -30,31 +35,6 @@ def setup():
         help = 'Output prefix.')
 
     return parser.parse_args()
-
-# Start the timer. 
-def start_time(string = None):
-    if string:
-        print (string)
-    return time.time()
-
-# End the timer. 
-def end_time(start, stop = False):
-    seconds = time.time() - start
-    hours, seconds =  seconds // 3600, seconds % 3600
-    minutes, seconds = seconds // 60, seconds % 60
-    string = f'{hours:02.0f}:{minutes:02.0f}:{seconds:02.0f}'
-    if stop:
-        return string
-    print (f'{string} elapsed.')
-
-# Return path to project level. 
-def project_path():
-    script_path = os.path.abspath(__file__)
-    script_folder = os.path.dirname(script_path)
-    src_folder = os.path.dirname(script_folder)
-    project_folder = os.path.dirname(src_folder)
-    
-    return project_folder
 
 # Load the labeled vectors to be trained on. 
 def load(filename):
@@ -325,17 +305,17 @@ def plot(x, y, name, filename):
 def main():
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
     
-    total_start = start_time()
+    total_start = utils.start_time()
     # Get argparse arguments. 
     arguments = setup()
 
-    start = start_time('Reading data.')
+    start = utils.start_time('Reading data.')
     x, y = load(arguments.input)
-    end_time(start)
+    utils.end_time(start)
         
-    start = start_time('Testing Model')
+    start = utils.start_time('Testing Model')
 
-    project_folder = project_path()
+    project_folder = utils.project_path()
     reports_folder = os.path.join(project_folder, 'reports')
     if arguments.prefix:
         filename = os.path.join(reports_folder, f'{arguments.prefix}_model_performance.pdf')
@@ -343,9 +323,9 @@ def main():
         filename = os.path.join(reports_folder, 'model_performance.pdf')
 
     plot(x, y, 'Neural Network', filename)
-    end_time(start) 
+    utils.end_time(start) 
 
-    start = start_time('Training Model')
+    start = utils.start_time('Training Model')
 
     models_folder = os.path.join(project_folder, 'models')
     if arguments.prefix:
@@ -355,9 +335,9 @@ def main():
 
     model = create_model(len(x[0]))
     train_network(model, x, y, filename = filename)
-    end_time(start)
+    utils.end_time(start)
 
-    total_time = end_time(total_start, True)
+    total_time = utils.end_time(total_start, True)
     print (f'{total_time} elapsed in total.')
 
 if __name__ == '__main__':

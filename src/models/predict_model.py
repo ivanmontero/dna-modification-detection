@@ -1,12 +1,14 @@
 from matplotlib import pyplot as plt
 from tensorflow import keras
 from matplotlib.backends.backend_pdf import PdfPages
-import sys
 
-sys.path.append('../utils/')
+import os
+import sys
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'utils'))
+
+import utils
 
 import numpy as np
-import os
 import argparse
 import json
 import time
@@ -57,31 +59,6 @@ def setup():
     )
 
     return parser.parse_args()
-
-# Start the timer. 
-def start_time(string = None):
-    if string:
-        print (string)
-    return time.time()
-
-# End the timer. 
-def end_time(start, stop = False):
-    seconds = time.time() - start
-    hours, seconds =  seconds // 3600, seconds % 3600
-    minutes, seconds = seconds // 60, seconds % 60
-    string = f'{hours:02.0f}:{minutes:02.0f}:{seconds:02.0f}'
-    if stop:
-        return string
-    print (f'{string} elapsed.')
-
-# Return path to project level. 
-def project_path():
-    script_path = os.path.abspath(__file__)
-    script_folder = os.path.dirname(script_path)
-    src_folder = os.path.dirname(script_folder)
-    project_folder = os.path.dirname(src_folder)
-    
-    return project_folder
 
 # Loads the extracted features file, and relevant data.
 def load(feature_file, original_file):
@@ -145,7 +122,7 @@ def main():
         for i, p in enumerate(window):
             original.loc[(chromosome, p), 'drop'] += drops[i]
 
-    project_folder = project_path()
+    project_folder = utils.project_path()
     data_folder = os.path.join(project_folder, 'data')
     processed_folder = os.path.join(data_folder, 'processed')
     reports_folder = os.path.join(project_folder, 'reports')

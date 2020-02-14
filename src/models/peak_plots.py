@@ -40,7 +40,7 @@ def load(original_file, predictions_file):
     data = original.merge(predictions, on= ["chromosome", "position"])
     return data
 
-def get_peaks(data, threshold):
+def get_peaks(data, threshold, min_peak_length=50): # Add another threshold for peak "length"
     data["peak_id"] = 0
     peak_id = 1
     in_peak = False
@@ -51,18 +51,22 @@ def get_peaks(data, threshold):
             data.loc[index, "peak_id"] = peak_id
         elif in_peak:
             in_peak = False
-            peak_id += 1
+            if (data["peak_id"] == peak_id).sum() < min_peak_length:
+                data[data["peak_id"] == peak_id] = 0
+            else:
+                peak_id += 1
     return peak_id if in_peak else peak_id - 1
     # print(peak_id)
-
-
 
 if __name__ == "__main__":
     args = setup()
     data = load(args.original_file, args.predictions_file)
     # print(data)
     total_peaks = get_peaks(data, 10)
-    print("here")
+
+    # for p in range(1, total_peaks+1):
+    #     print((data["peak_id"] == p).sum())
+    # # print("here")
     threshold = .2
     pj = []
     jp = []
