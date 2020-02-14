@@ -2,7 +2,12 @@ from tqdm import trange
 import numpy as np
 import argparse
 import time
+
 import os
+import sys
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'utils'))
+
+from utils import start_time, end_time, project_path
 
 # Return argparse arguments for extracting features from the data.
 def setup():
@@ -171,30 +176,3 @@ def create_fasta(vectors, window):
         output += header + line
 
     return output
-
-# Start the timer. 
-def start_time(string = None):
-    if string:
-        print (string)
-    return time.time()
-
-# End the timer. 
-def end_time(start, stop = False):
-    seconds = time.time() - start
-    hours, seconds =  seconds // 3600, seconds % 3600
-    minutes, seconds = seconds // 60, seconds % 60
-    string = f'{hours:02.0f}:{minutes:02.0f}:{seconds:02.0f}'
-    if stop:
-        return string
-    print (f'{string} elapsed.')
-
-# Get path to project directory.
-def project_path():
-    script_path = os.path.abspath(__file__)
-    script_folder = os.path.dirname(script_path)
-    src_folder = os.path.dirname(script_folder)
-    project_folder = os.path.dirname(src_folder)
-    
-    return project_folder
-
-

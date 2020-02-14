@@ -4,9 +4,12 @@ import pandas as pd
 import numpy as np
 import argparse
 import time
-import os
 
-from ..utils import utils
+import os
+import sys
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'utils'))
+
+import utils
 
 # Return argparse arguments. 
 def setup():
