@@ -77,28 +77,30 @@ def project_path():
 
 def windows(data, window, progress):
     radius = int((window - 1)/2)
+    iterator = range(radius, len(data.index) - radius - 1)
 
     if progress:
-        bar = tqdm(total = len(data))
+        bar = tqdm(total = len(iterator))
 
+    # TODO: Test if np.NaN is faster/better.
     vectors = [None]*len(data.index)
-    for j in range(radius, len(data.index) - radius - 1):
-        start = j - radius
-        end = j + radius + 1
+    for i in iterator:
+        start = i - radius
+        end = i + radius + 1
         section = data.iloc[start:end]
 
         start_position = data.index[start][1]
         end_position = data.index[end][1]
+
+        if progress:
+            bar.update()
 
         # Checks if rows are contiguous.
         if (abs(end_position - start_position) > window):
         	continue
    
         vector = section.to_numpy().flatten(order = 'F')
-        vectors[j] = vector
-
-        if progress:
-            bar.update()
+        vectors[i] = vector
 
     vectors = pd.DataFrame({'vectors': vectors}, index = data.index)
 
@@ -152,11 +154,12 @@ def main():
     data_folder = os.path.join(project_folder, 'data')
     processed_folder = os.path.join(data_folder, 'processed')
     if arguments.prefix:
-        filename = os.path.join(processed_folder, f'{arguments.prefix}_data.h5')
+        filename = os.path.join(processed_folder, f'{arguments.prefix}_data.p')
     else:
-        filename = os.path.join(processed_folder, 'data.h5')
+        filename = os.path.join(processed_folder, 'data.p')
 
-    data.to_hdf(filename, 'data', format = 'table')
+    # TODO: Reimplement as HDF or something. 
+    data.to_pickle(filename)
 
     column_labels = []
     for column in arguments.columns:

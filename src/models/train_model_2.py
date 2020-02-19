@@ -2,11 +2,16 @@ from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib import pyplot as plt
 from tensorflow import keras
 from sklearn import metrics
+import tensorflow as tf
+import pandas as pd
 import numpy as np
-import tqdm.keras
 import argparse
+import tqdm
 import json
 import time
+
+# Import Progress Bars
+import progress_bars
 
 # Import Helper Functions
 import os
@@ -44,6 +49,7 @@ def setup():
     
     parser.add_argument(
         '--holdout',
+        default = None, 
         help = 'Which chromosome to holdout for testing.')
     
     parser.add_argument(
@@ -61,14 +67,107 @@ def setup():
 
     return parser.parse_args()
 
-# Load the labeled vectors to be trained on. 
-def load(filename):
-    with open(filename) as infile:
-        contents = json.load(infile)
-        data = np.array(contents['vectors'])
-        labels = np.array(contents['labels'])
+def train_dataset(data, n_examples, threshold, holdout = None):
+    # Drop rows where there are any nulls.
+    data.dropna(inplace = True)
 
-    return data, labels
+    # Add a label column based on fold change threshold.
+    data.loc[data['fold_change'] >= threshold, 'labels'] = 1
+    data.loc[data['fold_change'] < threshold, 'labels'] = 0
+
+    # Remove test holdout chromosome. 
+    chromosomes = data.index.unique(level = 'chromosome').to_list()
+    if holdout:
+        chromosomes = chromosomes.remove(holdout)
+        data = data.loc[[chromosomes], :, :]
+
+    training = []
+    validation = []
+    # TODO: replace with variable
+    model = create_model(306)
+    for chromosome in chromosomes:
+        results = train_fold(data, n_examples, model, chromosome)
+        training_history
+        
+        training.append(training_history)
+        validation.append(validation_history)
+
+    return training, validation
+
+def train_fold(data, n_examples, model, holdout, batch_size = 32):
+
+    # Separate into training and validation. 
+    chromosomes = data.index.unique(level = 'chromosome').to_list()
+    chromosomes.remove(holdout)
+    training_fold = data.loc[chromosomes, :, :]
+    validation_fold = data.loc[holdout, :, :]
+
+    # Filter on labels.
+    positive = training_fold.loc[training_fold['labels'] == 1]
+    negative = training_fold.loc[training_fold['labels'] == 0]
+
+    # Sample n examples.
+    positive = sample(positive, n_examples)
+    negative = sample(negative, n_examples)
+
+    # Convert to numpy.
+    # Unfortunately there's this weird thing where if the numpy array has lists
+    # of uneven length, or in our case, Nones, then it makes a weird array that
+    # tensorflow doesn't like. We first have to convert the numpy array of numpy
+    # arrays into a list of numpy arrays then convert it back. There must be 
+    # something more elegant but this is what works for now.
+    positive_examples = np.array(list(positive['vectors'].to_numpy()))
+    positive_labels = positive['labels'].to_numpy()
+    negative_examples = np.array(list(negative['vectors'].to_numpy()))
+    negative_labels = negative['labels'].to_numpy()
+    validation_examples = np.array(list(validation_fold['vectors'].to_numpy()))
+    validation_labels = validation_fold['labels'].to_numpy()
+
+    # Aggregate training examples and labels.
+    train_examples = np.vstack([positive_examples, negative_examples])
+    train_labels = np.hstack([positive_labels, negative_labels])
+
+    # Shuffle the order of examples.
+    train_length = len(train_examples)
+    index = np.random.permutation(train_length)
+    train_examples = train_examples[index]
+    train_labels = train_labels[index]
+
+    # Convert to tensorflow dataset.
+    train_dataset = tf.data.Dataset.from_tensor_slices((train_examples, train_labels))
+    train_dataset = train_dataset.batch(batch_size)
+    validation_dataset = tf.data.Dataset.from_tensor_slices(validation_examples)
+    validation_dataset = validation_dataset.batch(batch_size)
+
+    # Compute the number of batches.
+    train_length = int(np.ceil(train_length/batch_size))
+    validation_length = int(np.ceil(len(validation_examples)/batch_size))
+
+    # Train the network, then validate, then reset for the next fold.
+    training_history, validation_history = train_network(model, train_dataset, train_length)
+    validation_scores = validate_network(model, validation_dataset, validation_length)
+    model.reset_states()
+    
+    false_positive_rate, true_positive_rate, thresholds = metrics.roc_curve(validation_labels, validation_scores)
+    roc_auc = metrics.auc(false_positive_rate, true_positive_rate)
+    
+    precision, recall, thresholds = metrics.precision_recall_curve(validation_labels, validation_scores)
+    pr_ap = metrics.average_precision_score(y_test, y_scores)
+
+    return (
+        training_history, 
+        validation_history, 
+        false_positive_rate, 
+        true_positive_rate, 
+        roc_auc, precision[::-1], 
+        recall[::-1], 
+        pr_ap)
+
+def sample(data, n_examples):
+    if len(data) <= n_examples:
+        return data
+    else:
+        return data.sample(n_examples)
 
 # We will define our model as a multi-layer densely connected neural network
 # with dropout between the layers.
@@ -78,60 +177,69 @@ def create_model(input_dim):
         keras.layers.Dense(
             300, 
             input_dim = input_dim, 
-            activation="relu"))
+            activation="relu"
+        ))
     model.add(
         keras.layers.Dropout(
-            0.5))
+            0.5
+        ))
     model.add(
         keras.layers.Dense(
             150, 
-            activation="relu"))
+            activation="relu"
+        ))
     model.add(
         keras.layers.Dropout(
-            0.5))
+            0.5
+        ))
     model.add(
         keras.layers.Dense(
             50, 
-            activation="relu"))
+            activation="relu"
+        ))
     model.add(
         keras.layers.Dense(
             1, 
-            activation="sigmoid"))
+            activation="sigmoid"
+        ))
     model.compile(
         optimizer="adam", 
         loss="binary_crossentropy", 
         metrics = ['accuracy'], 
-        verbose = 0)
+        )
 
     return model
 
-def train_fold(chromosome):
-
-    validation_set = [chromosome]
-    index = data.index.get_level_values('town').difference(validation_set)
-    indx = pd.IndexSlice[:, indices.values]
-    return data.loc['']
-
 # Begin training the neural network, with optional validation data, and model saving.
-def train_network(model, x_train, y_train, x_test = None, y_test = None, filename = None):
-    # Model testing phase with k-fold cross validation. 
-    if x_test is not None:
-        # Return training history after training for several epochs. Track
-        # progress through a TQDM bar. 
-        history = model.fit(
-            x_train, 
-            y_train, 
-            validation_data = (x_test, y_test), 
-            epochs = 10, 
-            verbose = 0, 
-            callbacks = [tqdm.keras.TqdmCallback(verbose = 0)])
-        y_scores = model.predict(x_test).reshape((-1))
-        
-        return y_scores, history.history
-    # Training on the entire dataset. 
-    else:
-        model.fit(x_train, y_train, epochs = 10, verbose = 0)
-        model.save(filename, save_format = 'tf')
+def train_network(model, training_dataset, length, validation_split = 0.1):
+    # TODO: There doesn't seem to be a great way to get the length of a
+    # tf.DataSet, so instead we resort to passing the variable. 
+    n_validation = int(length*validation_split)
+    validation_dataset = training_dataset.take(n_validation) 
+    training_dataset = training_dataset.skip(n_validation)
+
+    # Create out custom TQDM progress bar for training. 
+    callback = progress_bars.train_progress(length)
+
+    history = model.fit(
+        training_dataset,
+        validation_data = validation_dataset,
+        epochs = 10, 
+        verbose = 0,
+        use_multiprocessing = True, 
+        callbacks = [callback])
+    
+    return history.history['accuracy'], history.history['val_accuracy']
+
+def validate_network(model, validation_dataset, length):
+    callback = progress_bars.predict_progress(length)
+
+    scores = model.predict(
+        validation_dataset,
+        use_multiprocessing = True,
+        callbacks = [callback])
+
+    return scores
 
 def shortest_row(array):
     current = 0
@@ -334,46 +442,48 @@ def plot(x, y, name, filename):
         pdf.savefig()
         plt.close()
 
-
-
 def main():
+
     # Get rid of random tensorflow warnings.
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+
+    data = pd.read_pickle('/active/myler_p/People/Sur/software/dna-modification-detection/data/processed/test_data.p')
+    training, validation = train_dataset(data, 10000, 10, None)
     
-    total_start = utils.start_time()
-    # Get argparse arguments. 
-    arguments = setup()
+    # total_start = utils.start_time()
+    # # Get argparse arguments. 
+    # arguments = setup()
 
-    start = utils.start_time('Reading data.')
-    data = pd.read_hdf(arguments.infile)
-    utils.end_time(start)
+    # start = utils.start_time('Reading data.')
+    # data = pd.read_hdf(arguments.infile)
+    # utils.end_time(start)
         
-    start = utils.start_time('Testing Model')
+    # start = utils.start_time('Testing Model')
 
-    project_folder = utils.project_path()
-    reports_folder = os.path.join(project_folder, 'reports')
-    if arguments.prefix:
-        filename = os.path.join(reports_folder, f'{arguments.prefix}_model_performance.pdf')
-    else:
-        filename = os.path.join(reports_folder, 'model_performance.pdf')
+    # project_folder = utils.project_path()
+    # reports_folder = os.path.join(project_folder, 'reports')
+    # if arguments.prefix:
+    #     filename = os.path.join(reports_folder, f'{arguments.prefix}_model_performance.pdf')
+    # else:
+    #     filename = os.path.join(reports_folder, 'model_performance.pdf')
 
-    plot(x, y, 'Neural Network', filename)
-    utils.end_time(start) 
+    # plot(x, y, 'Neural Network', filename)
+    # utils.end_time(start) 
 
-    start = utils.start_time('Training Model')
+    # start = utils.start_time('Training Model')
 
-    models_folder = os.path.join(project_folder, 'models')
-    if arguments.prefix:
-        filename = os.path.join(models_folder, f'{arguments.prefix}_model.h5')
-    else:
-        filename = os.path.join(models_folder, 'model.h5')
+    # models_folder = os.path.join(project_folder, 'models')
+    # if arguments.prefix:
+    #     filename = os.path.join(models_folder, f'{arguments.prefix}_model.h5')
+    # else:
+    #     filename = os.path.join(models_folder, 'model.h5')
 
-    model = create_model(len(x[0]))
-    train_network(model, x, y, filename = filename)
-    utils.end_time(start)
+    # model = create_model(len(x[0]))
+    # train_network(model, x, y, filename = filename)
+    # utils.end_time(start)
 
-    total_time = utils.end_time(total_start, True)
-    print (f'{total_time} elapsed in total.')
+    # total_time = utils.end_time(total_start, True)
+    # print (f'{total_time} elapsed in total.')
 
 if __name__ == '__main__':
     main()
