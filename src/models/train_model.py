@@ -225,6 +225,9 @@ def train_network(training_dataset, model, length, validation_split = 0.1):
     
     return history.history['accuracy'], history.history['val_accuracy']
 
+# TODO: Right now it trains on everything in the end. Maybe that's too much? 
+# Maybe it won't generalize? Tough to say, we should probably check using the 
+# cross validation step. 
 def train_final(data, model, batch_size = 32):
     # Extract examples and labels.
     examples = np.array(list(data['vectors'].to_numpy()))
