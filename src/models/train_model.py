@@ -81,7 +81,7 @@ def setup():
 
     return parser.parse_args()
 
-def train_dataset(data, threshold, n_examples = None, holdout = None, window = None, train_final = False):
+def train_dataset(data, threshold, n_examples = None, holdout = None, window = None, train_final = False, center = False):
     # Drop rows where there are any nulls.
     data.dropna(inplace = True)
 
@@ -94,6 +94,10 @@ def train_dataset(data, threshold, n_examples = None, holdout = None, window = N
     if holdout:
         chromosomes = chromosomes.remove(holdout)
         data = data.loc[[chromosomes], :, :]
+
+    # Filter out non-centers if specified
+    if center:
+        data = data[(data["top_A"] == 1) | (data["top_T"] == 1)]
 
     # Training History
     training_history = []
@@ -314,7 +318,8 @@ def interpolate_curve(x, y, area):
     
 def plot(
     filename, 
-    name, 
+    name,
+    data,
     training_history, 
     validation_history, 
     false_positive_rate, 
@@ -478,7 +483,8 @@ def main():
         threshold = arguments.fold_change,
         n_examples = arguments.n_examples,
         holdout = arguments.holdout, 
-        window = window)
+        window = window,
+        center = arguments.center)
     utils.end_time(start) 
 
     # Plotting performance. 
@@ -490,7 +496,7 @@ def main():
         filename = os.path.join(reports_folder, f'{arguments.prefix}_model_performance.pdf')
     else:
         filename = os.path.join(reports_folder, 'model_performance.pdf')
-    plot(filename, 'Neural Network', **results)
+    plot(filename, 'Neural Network', data, **results)
 
     start = utils.start_time('Training Final Model')
     models_folder = os.path.join(project_folder, 'models')
