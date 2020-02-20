@@ -323,7 +323,6 @@ def plot(
     precision, recall, 
     average_precision):
 
-    # Training Plot
     with PdfPages(filename) as pdf:
         folds = len(training_history)
         mean_training = np.mean(training_history, axis = 0)
@@ -333,6 +332,7 @@ def plot(
         std_training = np.std(training_history, axis = 0)
         std_validation = np.std(validation_history, axis = 0)
 
+        # Training Plot
         plt.figure(
             figsize = (8, 4), 
             dpi = 150, 
@@ -374,6 +374,7 @@ def plot(
 
         mean_x, mean_y, lower_y, upper_y, mean_area, std_area = interpolate_curve(false_positive_rate, true_positive_rate, area_under_curve)
     
+        # ROC Curve
         plt.figure(
             figsize = (8, 4), 
             dpi = 150, 
@@ -415,6 +416,7 @@ def plot(
     
         mean_x, mean_y, lower_y, upper_y, mean_area, std_area = interpolate_curve(recall, precision, average_precision)
         
+        # Precision Recall Curve
         plt.figure(
             figsize = (8, 4), 
             dpi = 150, 
