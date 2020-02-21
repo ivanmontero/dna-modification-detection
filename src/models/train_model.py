@@ -26,7 +26,6 @@ import pandas as pd
 import numpy as np
 import argparse
 import json
-import time
 utils.end_time(start)
 
 # Return argparse arguments. 
@@ -142,6 +141,9 @@ def train_dataset(data, threshold, n_examples, holdout, window, center = False):
     if center:
         data = data[(data["top_A"] == 1) | (data["top_T"] == 1)]
 
+    # Percent of rows which are in peaks.
+    peak_percent = data['labels'].sum()/len(data)
+
     # Training History
     training_history = []
     validation_history = []
@@ -186,6 +188,7 @@ def train_dataset(data, threshold, n_examples, holdout, window, center = False):
         'precision': precision, 
         'recall': recall, 
         'average_precision': average_precision,
+        'peak_percent': round(peak_percent, 4),
         'peaks_with_j': peaks_with_j,
         'js_in_peak': js_in_peak,
         'peak_auc': peak_auc
@@ -219,7 +222,6 @@ def train_fold(data, model, n_examples, holdout, batch_size = 32):
     negative_labels = negative['labels'].to_numpy()
     validation_examples = np.array(list(validation_fold['vectors'].to_numpy()))
     validation_labels = validation_fold['labels'].to_numpy()
-
 
     # Aggregate training examples and labels.
     train_examples = np.vstack([positive_examples, negative_examples])
@@ -350,19 +352,23 @@ def create_model(input_dim):
 
     return model
 
+# TODO: Speed this up a bit.
 def peak_j_curve(peak_ids, y_scores):
-    total_peaks = max(peak_ids)
+    min_peak = min(peak_ids[peak_ids > 0])
+    max_peak = max(peak_ids)
+    # Add one to be inclusive of the last numbered peak.
+    total_peaks = max_peak - min_peak + 1
     peaks_with_j_array = []
     js_in_peak_array = []
     
-    for threshold in np.linspace(0, max(y_scores), 1000):
+    for threshold in np.linspace(0, 1, 1001):
         valid_js = (y_scores >= threshold)
         number_js =  valid_js.sum()
-        inside_peaks = (peak_ids != 0)
+        inside_peaks = (peak_ids > 0)
         js_in_peak = (valid_js & inside_peaks).sum()
 
         peaks_w_j = 0
-        for peak in range(1, total_peaks+1):
+        for peak in range(min_peak, max_peak + 1):
             current_peak = (peak_ids == peak)
             js_in_current_peak = (current_peak & valid_js).sum()
 
@@ -371,6 +377,12 @@ def peak_j_curve(peak_ids, y_scores):
 
         peaks_with_j_array.append(peaks_w_j / total_peaks)
         js_in_peak_array.append(js_in_peak / number_js)
+
+    # Doesn't really make sense but it helps with the AUC calculation.
+    # I don't think it would detract from the interpretability too much.
+    # TODO: Think about it some more lol.
+    peaks_with_j_array.append(0)
+    js_in_peak_array.append(1)
 
     return peaks_with_j_array, js_in_peak_array
 
@@ -382,25 +394,31 @@ def shortest_row(array):
             current = i
     return array[i]
 
-def interpolate_curve(x, y, area):
+def interpolate_curve(x, y, area, average = False):
     
-    interpolate_x = shortest_row(x)
-    interpolate_y = []
-    
-    for i in range(len(x)):
-        new_y = np.interp(interpolate_x, x[i], y[i])
-        interpolate_y.append(new_y)
-    
-    mean_y = np.mean(interpolate_y, axis = 0)
-    mean_area = np.mean(area)
+    if not average:
+        mean_x = shortest_row(x)
+        interpolate_y = []
+            
+        for i in range(len(x)):
+            new_y = np.interp(mean_x, x[i], y[i])
+            interpolate_y.append(new_y)
+        
+        mean_y = np.mean(interpolate_y, axis = 0)
+        std_y = np.std(interpolate_y, axis = 0)
 
-    std_y = np.std(interpolate_y, axis = 0)
+    else:
+        mean_x = np.mean(x, axis = 0)
+        mean_y = np.mean(y, axis = 0)
+        std_y = np.std(y, axis = 0)
+
+    mean_area = np.mean(area)
     std_area = np.std(area)
 
     lower_y = mean_y - std_y
     upper_y = mean_y + std_y
     
-    return interpolate_x, mean_y, lower_y, upper_y, mean_area, std_area
+    return mean_x, mean_y, lower_y, upper_y, mean_area, std_area
 
 def plot(
     filename, 
@@ -413,6 +431,7 @@ def plot(
     precision,
     recall, 
     average_precision,
+    peak_percent,
     peaks_with_j,
     js_in_peak,
     peak_auc,
@@ -460,14 +479,15 @@ def plot(
             bbox_to_anchor = (1.05, 1), 
             loc = 'upper left')
         plt.title(f'{folds} Fold Training with {name}')
-        plt.ylabel('Accuracy')
         plt.xlabel('Epoch')
+        plt.ylabel('Accuracy')
         plt.ylim([-0.1,1.1])
         plt.tight_layout()
         pdf.savefig()
         plt.close()
 
         mean_x, mean_y, lower_y, upper_y, mean_area, std_area = interpolate_curve(false_positive_rate, true_positive_rate, roc_auc)
+
     
         # ROC Curve
         plt.figure(
@@ -480,7 +500,7 @@ def plot(
                 true_positive_rate[i], 
                 linewidth = 1, 
                 alpha = 0.3, 
-                label = f"ROC Fold {i} (AUC = {roc_auc[i]:.2f})")
+                label = f"ROC Fold {i+1} (AUC = {roc_auc[i]:.2f})")
         plt.fill_between(
             mean_x, 
             lower_y, 
@@ -503,8 +523,10 @@ def plot(
             bbox_to_anchor = (1.05, 1), 
             loc = 'upper left')
         plt.title(f'{folds} Fold ROC with {name}')
-        plt.ylabel('True Positive Rate')
         plt.xlabel('False Positive Rate')
+        plt.xlim([-0.1, 1.1])
+        plt.ylabel('True Positive Rate')
+        plt.ylim([-0.1,1.1])
         plt.tight_layout()
         pdf.savefig()
         plt.close()
@@ -522,7 +544,7 @@ def plot(
                 precision[i], 
                 linewidth = 1,
                 alpha = 0.3,
-                label = f"PR Fold {i} (AP = {average_precision[i]:.2f})")
+                label = f"PR Fold {i+1} (AP = {average_precision[i]:.2f})")
         plt.fill_between(
             mean_x, 
             lower_y, 
@@ -538,21 +560,22 @@ def plot(
             label = fr'Mean PR (AP = {mean_area:.2f} $\pm$ {std_area:.2f})')
         plt.plot(
             [0, 1], 
-            [0.5, 0.5], 
+            [peak_percent, peak_percent], 
             linestyle = '--', 
             color = 'black')
         plt.legend(
             bbox_to_anchor = (1.05, 1), 
             loc = 'upper left')
         plt.title(f'{folds} Fold PR with {name}')
-        plt.ylabel('Precision')
         plt.xlabel('Recall')
+        plt.xlim([-0.1, 1.1])
+        plt.ylabel('Precision')
         plt.ylim([-0.1,1.1])
         plt.tight_layout()
         pdf.savefig()
         plt.close()
 
-        mean_x, mean_y, lower_y, upper_y, mean_area, std_area = interpolate_curve(peaks_with_j, js_in_peak, peak_auc)
+        mean_x, mean_y, lower_y, upper_y, mean_area, std_area = interpolate_curve(peaks_with_j, js_in_peak, peak_auc, True)
         
         # Peak J Curve
         plt.figure(
@@ -565,7 +588,7 @@ def plot(
                 js_in_peak[i], 
                 linewidth = 1,
                 alpha = 0.3,
-                label = f"PR Fold {i} (AP = {peak_auc[i]:.2f})")
+                label = f"Fold {i+1} (AUC = {peak_auc[i]:.2f})")
         plt.fill_between(
             mean_x, 
             lower_y, 
@@ -578,10 +601,10 @@ def plot(
             mean_y, 
             color = 'C0', 
             linewidth = 2,
-            label = fr'Mean PR (AP = {mean_area:.2f} $\pm$ {std_area:.2f})')
+            label = fr'Mean AUC = {mean_area:.2f} $\pm$ {std_area:.2f}')
         plt.plot(
             [0, 1], 
-            [0.5, 0.5], 
+            [peak_percent, peak_percent], 
             linestyle = '--', 
             color = 'black')
         plt.legend(
@@ -589,6 +612,7 @@ def plot(
             loc = 'upper left')
         plt.title(f'{folds} Fold Peak Recall with {name}')
         plt.xlabel('% Peaks with J')
+        plt.xlim([-0.1, 1.1])
         plt.ylabel('% Js in Peak')
         plt.ylim([-0.1,1.1])
         plt.tight_layout()
