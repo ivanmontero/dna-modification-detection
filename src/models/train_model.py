@@ -106,13 +106,13 @@ def label_peaks(data, threshold, min_peak_length = 50):
                 in_peak = True
                 data.iat[j, -1] = peak_id
 
-            # If have just exited a peak.
+            # If you have just exited a peak.
             elif in_peak:
                 in_peak = False
                 
                 # If the peak was too small. 
                 if (data["peak_id"] == peak_id).sum() < min_peak_length:
-                    data[data["peak_id"] == peak_id] = 0
+                    data.loc[data["peak_id"] == peak_id, 'peak_id'] = 0
                 else:
                     peak_id += 1
 
@@ -121,17 +121,16 @@ def label_peaks(data, threshold, min_peak_length = 50):
             peak_id = peak_id + 1
 
 def train_dataset(data, threshold, n_examples, holdout, window, center = False):
+
+    # Drop rows where there are any nulls.
+    data.dropna(inplace = True)
+
     # Add a label column based on fold change threshold.
     data.loc[data['fold_change'] >= threshold, 'labels'] = 1
     data.loc[data['fold_change'] < threshold, 'labels'] = 0
 
     # Add a peak column based on where ChIP peaks occur.
-    # TODO: Why is this creating empty rows?
     label_peaks(data, threshold)
-    data[data['vectors'] == 0] = None
-
-    # Drop rows where there are any nulls.
-    data.dropna(inplace = True)
 
     # Remove test holdout chromosome. 
     chromosomes = data.index.unique(level = 'chromosome').to_list()
@@ -221,9 +220,6 @@ def train_fold(data, model, n_examples, holdout, batch_size = 32):
     validation_examples = np.array(list(validation_fold['vectors'].to_numpy()))
     validation_labels = validation_fold['labels'].to_numpy()
 
-    for i in range(len(validation_examples)):
-        if type(validation_examples[i]) is int:
-            print (validation_fold.iloc[i]) 
 
     # Aggregate training examples and labels.
     train_examples = np.vstack([positive_examples, negative_examples])
@@ -256,9 +252,9 @@ def train_fold(data, model, n_examples, holdout, batch_size = 32):
     precision, recall, thresholds = metrics.precision_recall_curve(validation_labels, validation_scores)
     average_precision = metrics.average_precision_score(validation_labels, validation_scores)
 
-    peak_ids = data['peak_id'].to_numpy
-    peaks_with_j, js_in_peaks = peak_j_curve(peak_ids, validation_scores)
-    peak_auc = metrics.auc(peaks_with_j, js_in_peaks)
+    peak_ids = validation_fold['peak_id'].to_numpy()
+    peaks_with_j, js_in_peak = peak_j_curve(peak_ids, validation_scores)
+    peak_auc = metrics.auc(peaks_with_j, js_in_peak)
 
     return {
         'training_history': training_history, 
@@ -303,7 +299,7 @@ def validate_network(validation_dataset, model, length):
         use_multiprocessing = True,
         callbacks = [callback])
 
-    return scores
+    return scores.reshape(-1)
 
 # TODO: Right now it trains on everything in the end. Maybe that's too much? 
 # Maybe it won't generalize? Tough to say, we should probably check using the 
@@ -354,20 +350,27 @@ def create_model(input_dim):
 
     return model
 
-def peak_j_curve(y_scores, peak_ids):
-
+def peak_j_curve(peak_ids, y_scores):
     total_peaks = max(peak_ids)
     peaks_with_j_array = []
     js_in_peak_array = []
-    for threshold in np.linspace(0, max(y_scores.max), 1000):
-        js = (y_scores >= threshold).sum()
-        js_in_peak = ((y_scores >= threshold) & (peak_ids != 0)).sum()
+    
+    for threshold in np.linspace(0, max(y_scores), 1000):
+        valid_js = (y_scores >= threshold)
+        number_js =  valid_js.sum()
+        inside_peaks = (peak_ids != 0)
+        js_in_peak = (valid_js & inside_peaks).sum()
+
         peaks_w_j = 0
         for peak in range(1, total_peaks+1):
-            # Peaks where at least one of the positions have J
-            peaks_w_j += float(((peak_ids == peak) & (y_scores >= threshold)).sum() > 0)
+            current_peak = (peak_ids == peak)
+            js_in_current_peak = (current_peak & valid_js).sum()
+
+            if js_in_current_peak > 0:
+                peaks_w_j += 1
+
         peaks_with_j_array.append(peaks_w_j / total_peaks)
-        js_in_peak_array.append(js_in_peak / js)
+        js_in_peak_array.append(js_in_peak / number_js)
 
     return peaks_with_j_array, js_in_peak_array
 
@@ -585,8 +588,8 @@ def plot(
             bbox_to_anchor = (1.05, 1), 
             loc = 'upper left')
         plt.title(f'{folds} Fold Peak Recall with {name}')
-        plt.ylabel('Peaks with J')
-        plt.xlabel('Js in Peak')
+        plt.xlabel('% Peaks with J')
+        plt.ylabel('% Js in Peak')
         plt.ylim([-0.1,1.1])
         plt.tight_layout()
         pdf.savefig()
