@@ -81,13 +81,57 @@ def setup():
 
     return parser.parse_args()
 
-def train_dataset(data, threshold, n_examples = None, holdout = None, window = None, train_final = False, center = False):
-    # Drop rows where there are any nulls.
-    data.dropna(inplace = True)
+def label_peaks(data, threshold, min_peak_length = 50):
+    # TODO: Make this better. 
+    chromosome_list = data.index.get_level_values('chromosome').to_list()
+    chromosome_length = [0]
+    for chromosome in data.index.unique('chromosome'):
+        chromosome_length.append(chromosome_list.count(chromosome))
+    chromosome_length = np.cumsum(chromosome_length)
 
+    fold_change = data['fold_change'].to_numpy()
+    data['peak_id'] = 0
+    peak_id = 1
+
+    for i in range(len(chromosome_length) - 1):
+        start = chromosome_length[i]
+        end = chromosome_length[i+1]
+
+        in_peak = False
+        for j in range(start, end):
+            current_fold_change = fold_change[j]
+
+            # If you are currently in a peak.
+            if current_fold_change > threshold:
+                in_peak = True
+                data.iat[j, -1] = peak_id
+
+            # If have just exited a peak.
+            elif in_peak:
+                in_peak = False
+                
+                # If the peak was too small. 
+                if (data["peak_id"] == peak_id).sum() < min_peak_length:
+                    data[data["peak_id"] == peak_id] = 0
+                else:
+                    peak_id += 1
+
+        # At the end of each chromosome.             
+        if in_peak:
+            peak_id = peak_id + 1
+
+def train_dataset(data, threshold, n_examples, holdout, window, center = False):
     # Add a label column based on fold change threshold.
     data.loc[data['fold_change'] >= threshold, 'labels'] = 1
     data.loc[data['fold_change'] < threshold, 'labels'] = 0
+
+    # Add a peak column based on where ChIP peaks occur.
+    # TODO: Why is this creating empty rows?
+    label_peaks(data, threshold)
+    data[data['vectors'] == 0] = None
+
+    # Drop rows where there are any nulls.
+    data.dropna(inplace = True)
 
     # Remove test holdout chromosome. 
     chromosomes = data.index.unique(level = 'chromosome').to_list()
@@ -106,7 +150,7 @@ def train_dataset(data, threshold, n_examples = None, holdout = None, window = N
     # ROC Curve
     false_positive_rate = []
     true_positive_rate = []
-    area_under_curve = []
+    roc_auc = []
     
     # PR Curve
     recall = []
@@ -114,7 +158,9 @@ def train_dataset(data, threshold, n_examples = None, holdout = None, window = N
     average_precision = []
 
     # Peak vs. J curve
-    validation_scores = []
+    peaks_with_j = []
+    js_in_peak = []
+    peak_auc = []
 
     model = create_model(window)
     for chromosome in chromosomes:
@@ -123,11 +169,13 @@ def train_dataset(data, threshold, n_examples = None, holdout = None, window = N
         validation_history.append(results['validation_history'])
         false_positive_rate.append(results['false_positive_rate'])
         true_positive_rate.append(results['true_positive_rate'])
-        area_under_curve.append(results['area_under_curve'])
+        roc_auc.append(results['roc_auc'])
         recall.append(results['recall'])
         precision.append(results['precision'])
         average_precision.append(results['average_precision'])
-        validation_scores.append(results['validation_scores'])
+        peaks_with_j.append(results['peaks_with_j'])
+        js_in_peak.append(results['js_in_peak'])
+        peak_auc.append(results['peak_auc'])
 
     return (model,
     {
@@ -135,11 +183,13 @@ def train_dataset(data, threshold, n_examples = None, holdout = None, window = N
         'validation_history': validation_history, 
         'false_positive_rate': false_positive_rate, 
         'true_positive_rate': true_positive_rate, 
-        'area_under_curve':area_under_curve,
+        'roc_auc':roc_auc,
         'precision': precision, 
         'recall': recall, 
         'average_precision': average_precision,
-        'validation_scores': validation_scores
+        'peaks_with_j': peaks_with_j,
+        'js_in_peak': js_in_peak,
+        'peak_auc': peak_auc
     })
 
 def train_fold(data, model, n_examples, holdout, batch_size = 32):
@@ -171,6 +221,10 @@ def train_fold(data, model, n_examples, holdout, batch_size = 32):
     validation_examples = np.array(list(validation_fold['vectors'].to_numpy()))
     validation_labels = validation_fold['labels'].to_numpy()
 
+    for i in range(len(validation_examples)):
+        if type(validation_examples[i]) is int:
+            print (validation_fold.iloc[i]) 
+
     # Aggregate training examples and labels.
     train_examples = np.vstack([positive_examples, negative_examples])
     train_labels = np.hstack([positive_labels, negative_labels])
@@ -197,21 +251,27 @@ def train_fold(data, model, n_examples, holdout, batch_size = 32):
     model.reset_states()
     
     false_positive_rate, true_positive_rate, thresholds = metrics.roc_curve(validation_labels, validation_scores)
-    area_under_curve = metrics.auc(false_positive_rate, true_positive_rate)
+    roc_auc = metrics.auc(false_positive_rate, true_positive_rate)
     
     precision, recall, thresholds = metrics.precision_recall_curve(validation_labels, validation_scores)
     average_precision = metrics.average_precision_score(validation_labels, validation_scores)
+
+    peak_ids = data['peak_id'].to_numpy
+    peaks_with_j, js_in_peaks = peak_j_curve(peak_ids, validation_scores)
+    peak_auc = metrics.auc(peaks_with_j, js_in_peaks)
 
     return {
         'training_history': training_history, 
         'validation_history': validation_history, 
         'false_positive_rate': false_positive_rate, 
         'true_positive_rate': true_positive_rate, 
-        'area_under_curve':area_under_curve,
+        'roc_auc':roc_auc,
         'precision': precision[::-1], 
         'recall': recall[::-1], 
         'average_precision': average_precision,
-        'validation_scores': validation_scores
+        'peaks_with_j': peaks_with_j,
+        'js_in_peak': js_in_peak,
+        'peak_auc': peak_auc
     }
 
 # Begin training the neural network, with optional validation data, and model saving.
@@ -234,6 +294,16 @@ def train_network(training_dataset, model, length, validation_split = 0.1):
         callbacks = [callback])
     
     return history.history['accuracy'], history.history['val_accuracy']
+
+def validate_network(validation_dataset, model, length):
+    callback = progress_bars.predict_progress(length)
+
+    scores = model.predict(
+        validation_dataset,
+        use_multiprocessing = True,
+        callbacks = [callback])
+
+    return scores
 
 # TODO: Right now it trains on everything in the end. Maybe that's too much? 
 # Maybe it won't generalize? Tough to say, we should probably check using the 
@@ -261,16 +331,6 @@ def train_final(data, model, batch_size = 32):
         use_multiprocessing = True, 
         callbacks = [callback])
 
-def validate_network(validation_dataset, model, length):
-    callback = progress_bars.predict_progress(length)
-
-    scores = model.predict(
-        validation_dataset,
-        use_multiprocessing = True,
-        callbacks = [callback])
-
-    return scores
-
 def sample(data, n_examples):
     if len(data) <= n_examples:
         return data
@@ -293,6 +353,23 @@ def create_model(input_dim):
         metrics = ['accuracy'])
 
     return model
+
+def peak_j_curve(y_scores, peak_ids):
+
+    total_peaks = max(peak_ids)
+    peaks_with_j_array = []
+    js_in_peak_array = []
+    for threshold in np.linspace(0, max(y_scores.max), 1000):
+        js = (y_scores >= threshold).sum()
+        js_in_peak = ((y_scores >= threshold) & (peak_ids != 0)).sum()
+        peaks_w_j = 0
+        for peak in range(1, total_peaks+1):
+            # Peaks where at least one of the positions have J
+            peaks_w_j += float(((peak_ids == peak) & (y_scores >= threshold)).sum() > 0)
+        peaks_with_j_array.append(peaks_w_j / total_peaks)
+        js_in_peak_array.append(js_in_peak / js)
+
+    return peaks_with_j_array, js_in_peak_array
 
 def shortest_row(array):
     current = 0
@@ -322,36 +399,21 @@ def interpolate_curve(x, y, area):
     
     return interpolate_x, mean_y, lower_y, upper_y, mean_area, std_area
 
-def get_peaks(data, threshold = 10, min_peak_length=50):
-    # TODO: Parallelize this per chromosome; takes way too long
-    data["peak_id"] = 0
-    peak_id = 1
-    in_peak = False
-    for index, row in data.iterrows():
-        if row["fold_change"] > threshold:
-            if not in_peak:
-                in_peak = True
-            data.loc[index, "peak_id"] = peak_id
-        elif in_peak:
-            in_peak = False
-            if (data["peak_id"] == peak_id).sum() < min_peak_length:
-                data[data["peak_id"] == peak_id] = 0
-            else:
-                peak_id += 1
-    return peak_id if in_peak else peak_id - 1
-
 def plot(
     filename, 
-    name,
     data,
     training_history, 
     validation_history, 
     false_positive_rate, 
     true_positive_rate, 
-    area_under_curve, 
-    precision, recall, 
+    roc_auc, 
+    precision,
+    recall, 
     average_precision,
-    validation_scores):
+    peaks_with_j,
+    js_in_peak,
+    peak_auc,
+    name = 'Neural Network'):
 
     with PdfPages(filename) as pdf:
         folds = len(training_history)
@@ -402,7 +464,7 @@ def plot(
         pdf.savefig()
         plt.close()
 
-        mean_x, mean_y, lower_y, upper_y, mean_area, std_area = interpolate_curve(false_positive_rate, true_positive_rate, area_under_curve)
+        mean_x, mean_y, lower_y, upper_y, mean_area, std_area = interpolate_curve(false_positive_rate, true_positive_rate, roc_auc)
     
         # ROC Curve
         plt.figure(
@@ -415,7 +477,7 @@ def plot(
                 true_positive_rate[i], 
                 linewidth = 1, 
                 alpha = 0.3, 
-                label = f"ROC Fold {i} (AUC = {area_under_curve[i]:.2f})")
+                label = f"ROC Fold {i} (AUC = {roc_auc[i]:.2f})")
         plt.fill_between(
             mean_x, 
             lower_y, 
@@ -487,24 +549,45 @@ def plot(
         pdf.savefig()
         plt.close()
 
-        data["prediction"] = np.concatenate(tuple(validation_scores), axis=None)
-        num_peaks = get_peaks(data)
-        pj = []
-        jp = []
-        for threshold in np.linspace(0, data["prediction"].max(), 1000):
-            # print(threshold)
-            js = (data["prediction"] >= threshold).sum()
-            js_in_peak = ((data["prediction"] >= threshold) & (data["peak_id"] != 0)).sum()
-            peaks_w_j = 0
-            for p in range(1, total_peaks+1):
-                peaks_w_j += float(((data["peak_id"] == p) & (data["prediction"] >= threshold)).sum() > 0)
-            pj.append(peaks_w_j / total_peaks)
-            jp.append(js_in_peak / js)
-        plt.plot(pj, jp)
-        plt.xlabel("peaks w/ J")
-        plt.ylabel("J inside peaks")
-        plt.xlim((-0.1, 1.1))
-        plt.ylim((-0.1, 1.1))
+        mean_x, mean_y, lower_y, upper_y, mean_area, std_area = interpolate_curve(peaks_with_j, js_in_peak, peak_auc)
+        
+        # Peak J Curve
+        plt.figure(
+            figsize = (8, 4), 
+            dpi = 150, 
+            facecolor = 'white')
+        for i in range(len(peaks_with_j)):
+            plt.plot(
+                peaks_with_j[i], 
+                js_in_peak[i], 
+                linewidth = 1,
+                alpha = 0.3,
+                label = f"PR Fold {i} (AP = {peak_auc[i]:.2f})")
+        plt.fill_between(
+            mean_x, 
+            lower_y, 
+            upper_y, 
+            color = 'grey', 
+            alpha = 0.2, 
+            label = r'$\pm \sigma$')
+        plt.plot(
+            mean_x, 
+            mean_y, 
+            color = 'C0', 
+            linewidth = 2,
+            label = fr'Mean PR (AP = {mean_area:.2f} $\pm$ {std_area:.2f})')
+        plt.plot(
+            [0, 1], 
+            [0.5, 0.5], 
+            linestyle = '--', 
+            color = 'black')
+        plt.legend(
+            bbox_to_anchor = (1.05, 1), 
+            loc = 'upper left')
+        plt.title(f'{folds} Fold Peak Recall with {name}')
+        plt.ylabel('Peaks with J')
+        plt.xlabel('Js in Peak')
+        plt.ylim([-0.1,1.1])
         plt.tight_layout()
         pdf.savefig()
         plt.close()
@@ -545,7 +628,7 @@ def main():
         filename = os.path.join(reports_folder, f'{arguments.prefix}_model_performance.pdf')
     else:
         filename = os.path.join(reports_folder, 'model_performance.pdf')
-    plot(filename, 'Neural Network', data, **results)
+    plot(filename, data, **results)
 
     start = utils.start_time('Training Final Model')
     models_folder = os.path.join(project_folder, 'models')
