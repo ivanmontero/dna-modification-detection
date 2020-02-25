@@ -68,8 +68,8 @@ def setup():
     parser.add_argument(
         '-c',
         '--center',
-        default=False,
-        action='store_true',
+        default = False,
+        action = 'store_true',
         help = 'Whether to only center on As and Ts')
 
     parser.add_argument(
