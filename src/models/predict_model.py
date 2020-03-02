@@ -89,7 +89,7 @@ def feature_importance(model, vectors, data, metadata):
     
     drops = np.zeros((n, 1))
     for i in range(n):
-        drops[i] = max(0, predictions[i] - np.min(new_predictions[[i*3 for i in range(3)]]))
+        drops[i] = max(0, predictions[i] - np.min(new_predictions[[i*n for i in range(3)]]))
     
     data["drop"] = drops
 
@@ -138,9 +138,14 @@ def main():
                 iloc = c_data.index.get_loc(row.name)
                 window = c_data.iloc[iloc - WINDOW_AROUND_PEAK: iloc + WINDOW_AROUND_PEAK + 1]
                 c_pos = window.index.get_level_values('position')
+                plt.subplot(3, 1, 1)
                 plt.plot(c_pos, window["top_ipd"], label="top_ipd", linewidth=1)
                 plt.plot(c_pos, window["bottom_ipd"], label="bottom_ipd", linewidth=1)
+                plt.legend()
+                plt.subplot(3, 1, 2)
                 plt.plot(c_pos, window["fold_change"], label="fold_change", linewidth=1)
+                plt.legend()
+                plt.subplot(3, 1, 3)
                 plt.plot(c_pos, window["drop"], label="drop", linewidth=1)
                 plt.legend()
                 plt.tight_layout()
