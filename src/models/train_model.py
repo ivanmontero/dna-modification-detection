@@ -664,6 +664,7 @@ def main():
     else:
         filename = os.path.join(models_folder, 'model.h5')
     train_final(data, model)
+    model.save(filename)
     utils.end_time(start)
     total_time = utils.end_time(total_start, True)
     print (f'{total_time} elapsed in total.')

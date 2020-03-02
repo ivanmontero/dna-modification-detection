@@ -33,15 +33,15 @@ def setup():
 
     parser.add_argument(
         '-m', 
-        '--model', 
+        '--metadata',
         required = True,
-        help = 'Filename for model.')
-
+        help = 'Metadata for input table.')
+    
     parser.add_argument(
-        '-of',
-        '--original_file',
+        '-mf',
+        '--model_file',
         required = True,
-        help = 'Input preprocessed h5 original data file.'
+        help = 'The file containing the model'
     )
 
     parser.add_argument(
@@ -60,67 +60,59 @@ def setup():
 
     return parser.parse_args()
 
-# Loads the extracted features file, and relevant data.
-def load(feature_file, original_file):
-    with open(feature_file) as f:
-        contents = json.load(f)
-        data = contents['vectors']
-        positions = contents['positions']
-        chromosomes = contents['chromosomes']
-        feature_args = contents['arguments']
-
-    original = pd.read_hdf(original_file).loc[list(set(chromosomes))]
-
-    return np.array(data), np.array(positions), chromosomes, feature_args, original
+def predict(model, vectors, data):
+    data["prediction"] = model.predict(vectors, verbose=1)
 
 # Determines the most important bases in determining the model's confidence in the
 # window classification. Goes to each base in the window, and runs the classifier
 # with each changed to a different base. Returns the additive probability drop on
 # each base.
-def feature_importance(vector, prediction, model, feature_args):
-    features = np.zeros(feature_args['window'])
-    alternate = []
+def feature_importance(model, vectors, data, metadata):
+    arguments = metadata["arguments"]
+    window_size = arguments["window"]
+    columns = arguments["columns"]
+    predictions = data["prediction"]
+    center = window_size//2
+    n = vectors.shape[0]
 
-    a_start = feature_args['columns'].index('top_A') * feature_args['window']
-    t_start = feature_args['columns'].index('top_T') * feature_args['window']
-    c_start = feature_args['columns'].index('top_C') * feature_args['window']
-    g_start = feature_args['columns'].index('top_G') * feature_args['window']
-    for i in range(feature_args['window']): # Assumes a window size, and that the bases appear at the beginning
-        a = i + a_start
-        t = i + t_start
-        c = i + c_start
-        g = i + g_start
+    start_indexing = [columns.index('top_A'), columns.index('top_T'), columns.index('top_C'), columns.index('top_G')]
+    center_indexing = [i + center for i in start_indexing]
 
-        current = vector.copy()
-        embedding = vector[[a,t,c,g]]
-        new = 0
-        for j in range(1,4):
-            current[[a,t,c,g]] = np.roll(embedding, j)
-            alternate.append(current.copy())
+    rolled = np.zeros((n*3, vectors.shape[1]))
+    current = vectors.copy()
+    to_rotate = current[:,center_indexing]
+    for j in range(0, 3):
+        current[:,center_indexing] = np.roll(to_rotate, j+1, axis=1)
+        rolled[j*n:(j+1)*n,:] = current.copy()
 
-    alternate = np.array(alternate)
-    new_predictions = model.predict(alternate, batch_size = len(alternate))
-    for i in range(feature_args['window']):
-        features[i] = max(0, prediction - min(new_predictions[i*3:i*3+3]))
-
-    return features
+    new_predictions = model.predict(rolled, verbose=1)
+    
+    drops = np.zeros((n, 1))
+    for i in range(n):
+        drops[i] = max(0, predictions[i] - np.min(new_predictions[[i*3 for i in range(3)]]))
+    
+    data["drop"] = drops
 
 def main():
+    # Get rid of random tensorflow warnings.
+    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+
     arguments = setup()
-    model = keras.models.load_model(arguments.model)
-    data, positions, chromosomes, feature_args, original = load(arguments.input, arguments.original_file)
+    print ('Reading Data')
+    data = pd.read_pickle(arguments.input)
+    with open(arguments.metadata) as infile:
+        metadata = json.load(infile)
 
-    original["drop"] = 0
-    predictions = model.predict(data)
+    data = data.dropna()
+    vectors = np.array(list(data['vectors'].to_numpy()))
+    model = keras.models.load_model(arguments.model_file)
+    window = len(metadata['columns'])
 
-    for i in tqdm.tqdm(range(len(data))):
-        window = positions[i]
-        vector = data[i] 
-        chromosome = chromosomes[i]
-        prediction = predictions[i]
-        drops = feature_importance(vector, prediction, model, feature_args)
-        for i, p in enumerate(window):
-            original.loc[(chromosome, p), 'drop'] += drops[i]
+    print ('Making Predictions')
+    predict(model, vectors, data)
+
+    print ('Running Feature Importance')
+    feature_importance(model, vectors, data, metadata)
 
     project_folder = utils.project_path()
     data_folder = os.path.join(project_folder, 'data')
@@ -133,11 +125,13 @@ def main():
         reports_filename = os.path.join(reports_folder, 'feature_importance.pdf')
         predictions_filename = os.path.join(processed_folder, 'predictions.csv')
 
-    original['drop'].to_csv(predictions_filename)
+    print ('Saving Feature Importance Values')
+    data['drop'].to_csv(predictions_filename)
 
+    print ('Saving Feature Importance Plots')
     with PdfPages(reports_filename) as pdf: 
-        for c in set(original.index.get_level_values('chromosome')):
-            c_data = original.loc[c]
+        for c in set(data.index.get_level_values('chromosome')):
+            c_data = data.loc[c]
             largest_rows = c_data.nlargest(PEAKS_TO_VISUALIZE, 'drop')
 
             for index, row in largest_rows.iterrows():
