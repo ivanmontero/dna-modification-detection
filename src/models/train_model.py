@@ -1,39 +1,55 @@
+import argparse
+
 # TODO: Importing all the modules takes like 15-20 seconds. The main culprits
 # are tensorflow.keras, matplotlib.backends.backend_pdf.PdfPages, and
 # sklearn.metrics. Use python -X importtime to profile import times, or drop in
-# a time.time() before and after import statements. 
+# a time.time() before and after import statements.
+def import_modules():
+    print ('Importing Modules')
+    # Make the local imports global
+    global os
+    global sys
+    global utils
+    global progress_bars
+    global PdfPages
+    global plt
+    global keras 
+    global metrics
+    global tf
+    global pd
+    global np
+    global json
 
-print ('Importing Modules')
-# Import Local Helper Functions
-import os
-import sys
-current_path = os.path.dirname(__file__)
-utils_path = os.path.join(current_path, '..', 'utils')
-sys.path.append(utils_path)
-import utils
-start = utils.start_time()
+    # Import Local Helper Functions
+    import os
+    import sys
+    current_path = os.path.dirname(__file__)
+    utils_path = os.path.join(current_path, '..', 'utils')
+    sys.path.append(utils_path)
+    import utils
+    
+    start = utils.start_time()
+    # Local Import
+    import progress_bars
 
-# Local Import
-import progress_bars
-
-# Import Everything Else
-from matplotlib.backends.backend_pdf import PdfPages
-from matplotlib import pyplot as plt
-from tensorflow import keras
-from sklearn import metrics
-import tensorflow as tf
-import pandas as pd
-import numpy as np
-import argparse
-import json
-utils.end_time(start)
+    # Import Everything Else
+    from matplotlib.backends.backend_pdf import PdfPages
+    from matplotlib import pyplot as plt
+    from tensorflow import keras
+    from sklearn import metrics
+    import tensorflow as tf
+    import pandas as pd
+    import numpy as np
+    import json
+    utils.end_time(start)
 
 # Return argparse arguments. 
 def setup():
     parser = argparse.ArgumentParser(
-        description = 'Train a neural network and save it.')
+        description = 'Train a neural network and save it.', 
+        formatter_class = argparse.RawTextHelpFormatter)
 
-    parser.version = 0.5
+    parser.version = 0.6
 
     parser.add_argument(
         '-i', 
@@ -48,35 +64,51 @@ def setup():
         help = 'Metadata for input table.')
 
     parser.add_argument(
+        '-f'
         '--fold-change',
         default = 10,
         type = float, 
-        help = 'Fold change threshold value.')
+        help = 'Fold change threshold value.\n(Default: 10)')
 
     parser.add_argument(
         '-n',
         '--n-examples',
-        default = 1000,
+        default = 5000,
         type = int,
-        help = 'Number of examples from each class.')
+        help = 'Number of examples from each class.\n(Default: 5,000)')
     
     parser.add_argument(
+        '-o'
         '--holdout',
         default = None, 
-        help = 'Which chromosome to holdout for testing.')
-    
-    parser.add_argument(
-        '-c',
-        '--center',
-        default = False,
-        action = 'store_true',
-        help = 'Whether to only center on As and Ts')
+        help = 'Which chromosome to holdout for testing.\n(Default: None)') 
 
     parser.add_argument(
         '-p', 
         '--prefix', 
         default = False,
         help = 'Output prefix.')
+
+    # Whether to only center on As and Ts'
+    parser.add_argument(
+        '--center',
+        default = False,
+        action = 'store_true',
+        help = argparse.SUPPRESS)
+
+    # Skip the final 
+    parser.add_argument(
+        '--skip-final',
+        default = False,
+        action = 'store_true',
+        help = argparse.SUPPRESS)
+
+    # Train on all examples instead of sampling. 
+    parser.add_argument(
+        '--train-all',
+        default = False,
+        action = 'store_true',
+        help = argparse.SUPPRESS)
 
     return parser.parse_args()
 
@@ -119,7 +151,7 @@ def label_peaks(data, threshold, min_peak_length = 50):
         if in_peak:
             peak_id = peak_id + 1
 
-def train_dataset(data, threshold, n_examples, holdout, window, center = False):
+def train_dataset(data, threshold, n_examples, holdout, window, center = False, train_all = False):
 
     # Drop rows where there are any nulls.
     data.dropna(inplace = True)
@@ -165,7 +197,7 @@ def train_dataset(data, threshold, n_examples, holdout, window, center = False):
 
     model = create_model(window)
     for chromosome in chromosomes:
-        results = train_fold(data, model, n_examples, chromosome)
+        results = train_fold(data, model, n_examples, chromosome, train_all = train_all)
         training_history.append(results['training_history'])
         validation_history.append(results['validation_history'])
         false_positive_rate.append(results['false_positive_rate'])
@@ -194,7 +226,7 @@ def train_dataset(data, threshold, n_examples, holdout, window, center = False):
         'peak_auc': peak_auc
     })
 
-def train_fold(data, model, n_examples, holdout, batch_size = 32):
+def train_fold(data, model, n_examples, holdout, batch_size = 32, train_all = False):
 
     # Separate into training and validation. 
     chromosomes = data.index.unique(level = 'chromosome').to_list()
@@ -205,10 +237,12 @@ def train_fold(data, model, n_examples, holdout, batch_size = 32):
     # Filter on labels.
     positive = training_fold.loc[training_fold['labels'] == 1]
     negative = training_fold.loc[training_fold['labels'] == 0]
-
+    
     # Sample n examples.
-    positive = sample(positive, n_examples)
-    negative = sample(negative, n_examples)
+    n_examples = int(n_examples/2)
+    if not train_all: 
+        positive = sample(positive, n_examples)
+        negative = sample(negative, n_examples)
 
     # Convert to numpy.
     # Unfortunately there's this weird thing where if the numpy array has lists
@@ -287,8 +321,7 @@ def train_network(training_dataset, model, length, validation_split = 0.1):
         training_dataset,
         validation_data = validation_dataset,
         epochs = 10, 
-        verbose = 0,
-        use_multiprocessing = True, 
+        verbose = 0, 
         callbacks = [callback])
     
     return history.history['accuracy'], history.history['val_accuracy']
@@ -298,7 +331,6 @@ def validate_network(validation_dataset, model, length):
 
     scores = model.predict(
         validation_dataset,
-        use_multiprocessing = True,
         callbacks = [callback])
 
     return scores.reshape(-1)
@@ -325,8 +357,7 @@ def train_final(data, model, batch_size = 32):
     model.fit(
         data,
         epochs = 10, 
-        verbose = 0,
-        use_multiprocessing = True, 
+        verbose = 0, 
         callbacks = [callback])
 
 def sample(data, n_examples):
@@ -620,13 +651,17 @@ def plot(
         plt.close()
 
 def main():
+    # Get argparse arguments. 
+    arguments = setup()
+
+    # Import modules. It's placed here since it takes like 20 seconds. 
+    import_modules()
 
     total_start = utils.start_time()
     # Get rid of random tensorflow warnings.
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
-    # Get argparse arguments. 
-    arguments = setup()
+
 
     # Reading data. 
     print ('Reading Data')
@@ -643,7 +678,8 @@ def main():
         n_examples = arguments.n_examples,
         holdout = arguments.holdout, 
         window = window,
-        center = arguments.center)
+        center = arguments.center,
+        train_all = arguments.train_all)
     utils.end_time(start) 
 
     # Plotting performance. 
@@ -657,14 +693,15 @@ def main():
         filename = os.path.join(reports_folder, 'model_performance.pdf')
     plot(filename, data, **results)
 
-    start = utils.start_time('Training Final Model')
-    models_folder = os.path.join(project_folder, 'models')
-    if arguments.prefix:
-        filename = os.path.join(models_folder, f'{arguments.prefix}_model.h5')
-    else:
-        filename = os.path.join(models_folder, 'model.h5')
-    train_final(data, model)
-    utils.end_time(start)
+    if not arguments.skip_final:
+        start = utils.start_time('Training Final Model')
+        models_folder = os.path.join(project_folder, 'models')
+        if arguments.prefix:
+            filename = os.path.join(models_folder, f'{arguments.prefix}_model.h5')
+        else:
+            filename = os.path.join(models_folder, 'model.h5')
+        train_final(data, model)
+        utils.end_time(start)
     total_time = utils.end_time(total_start, True)
     print (f'{total_time} elapsed in total.')
 
