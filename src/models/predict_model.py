@@ -16,7 +16,7 @@ import tqdm
 import pandas as pd
 
 PEAKS_TO_VISUALIZE = 10
-WINDOW_AROUND_PEAK = 1000
+WINDOW_AROUND_PEAK = 250
 
 # Return argparse arguments. 
 def setup():
@@ -85,12 +85,13 @@ def feature_importance(model, vectors, data, metadata):
         current[:,center_indexing] = np.roll(to_rotate, j+1, axis=1)
         rolled[j*n:(j+1)*n,:] = current.copy()
 
-    new_predictions = model.predict(rolled, verbose=1)
+    roll_pred = model.predict(rolled, verbose=1)
     
-    drops = np.zeros((n, 1))
-    for i in range(n):
-        drops[i] = max(0, predictions[i] - np.min(new_predictions[[i*n for i in range(3)]]))
-    
+    drops = predictions - np.min(
+                np.concatenate(
+                    (roll_pred[:n], roll_pred[n:2*n], roll_pred[2*n:]), axis=-1), axis=-1)
+        
+    drops[drops < 0] = 0
     data["drop"] = drops
 
 def main():
