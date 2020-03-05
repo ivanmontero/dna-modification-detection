@@ -139,16 +139,25 @@ def main():
                 iloc = c_data.index.get_loc(row.name)
                 window = c_data.iloc[iloc - WINDOW_AROUND_PEAK: iloc + WINDOW_AROUND_PEAK + 1]
                 c_pos = window.index.get_level_values('position')
+                # TODO
                 plt.subplot(3, 1, 1)
-                plt.plot(c_pos, window["top_ipd"], label="top_ipd", linewidth=1)
-                plt.plot(c_pos, window["bottom_ipd"], label="bottom_ipd", linewidth=1)
-                plt.legend()
+                min_top, min_bottom = window["top_ipd"].min(), window["bottom_ipd"].min()
+                plt.plot(c_pos, window["top_ipd"] - min_top, label="top_ipd", linewidth=1)
+                plt.plot(c_pos, -window["bottom_ipd"] + min_bottom, label="bottom_ipd", linewidth=1)
+                plt.legend(
+                    bbox_to_anchor = (1.05, 1), 
+                    loc = 'upper left')
                 plt.subplot(3, 1, 2)
                 plt.plot(c_pos, window["fold_change"], label="fold_change", linewidth=1)
-                plt.legend()
+                plt.legend(
+                    bbox_to_anchor = (1.05, 1), 
+                    loc = 'upper left')
                 plt.subplot(3, 1, 3)
+                plt.plot(c_pos, window["prediction"], label="prediction", linewidth=1)
                 plt.plot(c_pos, window["drop"], label="drop", linewidth=1)
-                plt.legend()
+                plt.legend(
+                    bbox_to_anchor = (1.05, 1), 
+                    loc = 'upper left')
                 plt.tight_layout()
                 pdf.savefig()
                 plt.close()
