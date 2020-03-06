@@ -16,7 +16,7 @@ import tqdm
 import pandas as pd
 
 PEAKS_TO_VISUALIZE = 10
-WINDOW_AROUND_PEAK = 1000
+WINDOW_AROUND_PEAK = 250
 
 # Return argparse arguments. 
 def setup():
@@ -85,12 +85,13 @@ def feature_importance(model, vectors, data, metadata):
         current[:,center_indexing] = np.roll(to_rotate, j+1, axis=1)
         rolled[j*n:(j+1)*n,:] = current.copy()
 
-    new_predictions = model.predict(rolled, verbose=1)
+    roll_pred = model.predict(rolled, verbose=1)
     
-    drops = np.zeros((n, 1))
-    for i in range(n):
-        drops[i] = max(0, predictions[i] - np.min(new_predictions[[i*n for i in range(3)]]))
-    
+    drops = predictions - np.min(
+                np.concatenate(
+                    (roll_pred[:n], roll_pred[n:2*n], roll_pred[2*n:]), axis=-1), axis=-1)
+        
+    drops[drops < 0] = 0
     data["drop"] = drops
 
 def main():
@@ -138,16 +139,25 @@ def main():
                 iloc = c_data.index.get_loc(row.name)
                 window = c_data.iloc[iloc - WINDOW_AROUND_PEAK: iloc + WINDOW_AROUND_PEAK + 1]
                 c_pos = window.index.get_level_values('position')
+                # TODO
                 plt.subplot(3, 1, 1)
-                plt.plot(c_pos, window["top_ipd"], label="top_ipd", linewidth=1)
-                plt.plot(c_pos, window["bottom_ipd"], label="bottom_ipd", linewidth=1)
-                plt.legend()
+                min_top, min_bottom = window["top_ipd"].min(), window["bottom_ipd"].min()
+                plt.plot(c_pos, window["top_ipd"] - min_top, label="top_ipd", linewidth=1)
+                plt.plot(c_pos, -window["bottom_ipd"] + min_bottom, label="bottom_ipd", linewidth=1)
+                plt.legend(
+                    bbox_to_anchor = (1.05, 1), 
+                    loc = 'upper left')
                 plt.subplot(3, 1, 2)
                 plt.plot(c_pos, window["fold_change"], label="fold_change", linewidth=1)
-                plt.legend()
+                plt.legend(
+                    bbox_to_anchor = (1.05, 1), 
+                    loc = 'upper left')
                 plt.subplot(3, 1, 3)
+                plt.plot(c_pos, window["prediction"], label="prediction", linewidth=1)
                 plt.plot(c_pos, window["drop"], label="drop", linewidth=1)
-                plt.legend()
+                plt.legend(
+                    bbox_to_anchor = (1.05, 1), 
+                    loc = 'upper left')
                 plt.tight_layout()
                 pdf.savefig()
                 plt.close()
