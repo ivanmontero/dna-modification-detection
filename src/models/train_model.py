@@ -661,8 +661,6 @@ def main():
     # Get rid of random tensorflow warnings.
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
-
-
     # Reading data. 
     print ('Reading Data')
     data = pd.read_pickle(arguments.input)
@@ -693,15 +691,15 @@ def main():
         filename = os.path.join(reports_folder, 'model_performance.pdf')
     plot(filename, data, **results)
 
-    if not arguments.skip_final:
-        start = utils.start_time('Training Final Model')
-        models_folder = os.path.join(project_folder, 'models')
-        if arguments.prefix:
-            filename = os.path.join(models_folder, f'{arguments.prefix}_model.h5')
-        else:
-            filename = os.path.join(models_folder, 'model.h5')
-        train_final(data, model)
-        utils.end_time(start)
+    start = utils.start_time('Training Final Model')
+    models_folder = os.path.join(project_folder, 'models')
+    if arguments.prefix:
+        filename = os.path.join(models_folder, f'{arguments.prefix}_model.h5')
+    else:
+        filename = os.path.join(models_folder, 'model.h5')
+    train_final(data, model)
+    model.save(filename)
+    utils.end_time(start)
     total_time = utils.end_time(total_start, True)
     print (f'{total_time} elapsed in total.')
 

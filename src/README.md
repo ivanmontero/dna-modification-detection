@@ -15,7 +15,7 @@ models/
 `python src/data/preprocessing.py -i data/test/test_new_ipd.csv -f data/test/test_fold_change.csv -p test`
 
 2) Generate the feature vectors from windows of genomic information.  
-`python src/features/genome_extraction.py -i data/interm/test_data.h5 -p test`
+`python src/features/extraction.py -i data/interm/test_data.h5 -p test`
 
 3) Train the model on the data. 
 `python src/models/train_model.py -i data/processed/test_data.json -p test`
