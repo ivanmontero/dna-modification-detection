@@ -72,7 +72,7 @@ def windows(chunk, queue, counter, progress):
     radius = int((window - 1)/2)
 
     # Update progress bar after this many rows. 
-    interval = 100
+    interval = 500
     columns = data.shape[1]
     vectors = [[0] * columns * window] * len(data)
 
@@ -87,7 +87,7 @@ def windows(chunk, queue, counter, progress):
         start_position = index[start]
         end_position = index[end]
 
-        if (i % interval == 0) & (progress):
+        if (i % interval == 0) & bool(progress):
             with counter.get_lock():
                 counter.value += interval
                 progress.n = counter.value
@@ -107,8 +107,13 @@ def windows(chunk, queue, counter, progress):
             progress.n = counter.value
             progress.refresh()
 
-    filename = os.path.join(folder, f'{position}.npy')
-    np.save(filename, np.array(vectors))
+    vectors = np.array(vectors)
+    nbytes = vectors.nbytes
+    splits = np.ceil(nbytes/1e9)
+    chunks = np.array_split(vectors, splits)
+
+    for i in range(len(chunks)):
+        queue.put((position, i, chunks[i]))
 
 # Divide the table into the number of cores available so we can use the 
 # multiprocessing package. 
@@ -145,13 +150,25 @@ def chunking(data, interm_folder, window):
 
     return chunks, total
 
-def combine(folder, window):
-    # Read from disk.
-    results = []
+def combine(results, window):
+    combined_result = {}
     for i in range(multiprocessing.cpu_count()):
-        filename = os.path.join(folder, f'{i}.npy')
-        results.append(np.load(filename))
-        os.remove(filename)
+        combined_result[i] = []
+
+    for item in results:
+        process = item[0]
+        combined_result[process].append(item[1:])
+
+    results = []
+    for key in combined_result:
+        process = combined_result[key]
+        ordered_list = [0] * len(process)
+
+        for item in process:
+            order = item[0]
+            ordered_list[order] = item[1]
+
+        results.append(np.vstack(ordered_list))
 
     radius = int((window - 1)/2)
     first_result = results[0][:-(radius + 1)]
@@ -177,37 +194,45 @@ def main():
     start = utils.start_time('Reading Data')
     data = pd.read_hdf(arguments.infile)
 
+    # Get the folder path for the data folders.
     project_folder = utils.project_path()
     data_folder = os.path.join(project_folder, 'data')
     interm_folder = os.path.join(data_folder, 'interm')
 
-    chunks, total = chunking(data[arguments.columns], interm_folder, arguments.window)
+    # Chunk the dataset into the number of processors.
+    data, total = chunking(
+        data[arguments.columns],
+        interm_folder,
+        arguments.window)
     utils.end_time(start)
 
-    # We then send a set number of jobs equal to the number of cores. Each
-    # process loads its data into a queue and we dequeue as they come into it. 
-    start = utils.start_time(f'Using {len(chunks)} Cores')
+    # Setup the progress bar.
+    start = utils.start_time(f'Using {len(data)} Cores')
     counter = multiprocessing.Value('i', 0)
-    queue = multiprocessing.Queue(maxsize = 0)
+    queue = multiprocessing.SimpleQueue()
     progress = tqdm.tqdm(total = total, unit = ' rows', leave = False)
-    
+    if arguments.progress_off:
+        progress = None
+
+    # Send off one job for each chunk.
     processes = []
-    for chunk in chunks:
+    for chunk in data:
         process = multiprocessing.Process(target = windows, args = (chunk, queue, counter, progress))
         process.start()
         processes.append(process)
 
-    for process in processes:
-        process.join()
+    results = []
+    while multiprocessing.active_children():
+        results.append(queue.get())
 
     utils.end_time(start)
 
-    
-    # Combine the results and write to disk. 
     start = utils.start_time('Combining Data')
-    results = combine(interm_folder, arguments.window)
+    results = combine(results, arguments.window)
+    utils.end_time(start)
 
-    # Save the data folder again.
+    # Save the feature vectors as numpy arrays.
+    start = utils.start_time('Saving Data')
     processed_folder = os.path.join(data_folder, 'processed')
     if arguments.prefix:
         filename = os.path.join(processed_folder, f'{arguments.prefix}_data.npy')
@@ -234,7 +259,7 @@ def main():
     utils.end_time(start)
     total_time = utils.end_time(total_start, True)
     print (f'{total_time} elapsed in total.')
-
+    
 if __name__ == '__main__':
     main()
 
