@@ -131,36 +131,45 @@ def main():
 
     print ('Saving Feature Importance Plots')
     with PdfPages(reports_filename) as pdf: 
+        # plot_region(pdf, data, "25L_PLASMID_corrected", 4212, 4270)
         for c in set(data.index.get_level_values('chromosome')):
             c_data = data.loc[c]
             largest_rows = c_data.nlargest(PEAKS_TO_VISUALIZE, 'drop')
-
             for index, row in largest_rows.iterrows():
                 iloc = c_data.index.get_loc(row.name)
                 window = c_data.iloc[iloc - WINDOW_AROUND_PEAK: iloc + WINDOW_AROUND_PEAK + 1]
-                c_pos = window.index.get_level_values('position')
-                # TODO
-                plt.subplot(3, 1, 1)
-                min_top, min_bottom = window["top_ipd"].min(), window["bottom_ipd"].min()
-                plt.plot(c_pos, window["top_ipd"] - min_top, label="top_ipd", linewidth=1)
-                plt.plot(c_pos, -window["bottom_ipd"] + min_bottom, label="bottom_ipd", linewidth=1)
-                plt.legend(
-                    bbox_to_anchor = (1.05, 1), 
-                    loc = 'upper left')
-                plt.subplot(3, 1, 2)
-                plt.plot(c_pos, window["fold_change"], label="fold_change", linewidth=1)
-                plt.legend(
-                    bbox_to_anchor = (1.05, 1), 
-                    loc = 'upper left')
-                plt.subplot(3, 1, 3)
-                plt.plot(c_pos, window["prediction"], label="prediction", linewidth=1)
-                plt.plot(c_pos, window["drop"], label="drop", linewidth=1)
-                plt.legend(
-                    bbox_to_anchor = (1.05, 1), 
-                    loc = 'upper left')
-                plt.tight_layout()
-                pdf.savefig()
-                plt.close()
+                plot_window(pdf, window)
+
+def plot_region(pdf, data, chromosome, start_position, end_position):
+    window = data.loc[chromosome, start_position:end_position, :]
+    plot_window(pdf, window)
+
+def plot_window(pdf, window):
+    plot_row_num = 3 if "fold_change" in window.columns else 2
+    c_pos = window.index.get_level_values('position')
+    # TODO: Show the actual IPD values
+    plt.subplot(plot_row_num, 1, 1)
+    min_top, min_bottom = window["top_ipd"].min(), window["bottom_ipd"].min()
+    plt.plot(c_pos, window["top_ipd"] - min_top, label="top_ipd", linewidth=1)
+    plt.plot(c_pos, -window["bottom_ipd"] + min_bottom, label="bottom_ipd", linewidth=1)
+    plt.legend(
+        bbox_to_anchor = (1.05, 1), 
+        loc = 'upper left')
+    plt.subplot(plot_row_num, 1, 2)
+    plt.plot(c_pos, window["prediction"], label="prediction", linewidth=1)
+    plt.plot(c_pos, window["drop"], label="drop", linewidth=1)
+    plt.legend(
+        bbox_to_anchor = (1.05, 1), 
+        loc = 'upper left')
+    plt.tight_layout()
+    if "fold_change" in window.columns:
+        plt.subplot(plot_row_num, 1, 3)
+        plt.plot(c_pos, window["fold_change"], label="fold_change", linewidth=1)
+        plt.legend(
+            bbox_to_anchor = (1.05, 1), 
+            loc = 'upper left')
+    pdf.savefig()
+    plt.close()
 
 if __name__ == '__main__':
     main()
