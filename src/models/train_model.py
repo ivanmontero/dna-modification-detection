@@ -184,6 +184,14 @@ def train_dataset(vectors, dataframe, threshold, n_examples, holdout, window, mi
         vectors = vectors[condition]
         dataframe = dataframe.loc[condition]
 
+    # Remove the Maxi_A chromosome.
+    if 'MaxiA' in chromosomes:
+        index = dataframe.index.get_level_values('chromosome')
+        chromosomes = chromosomes.remove('MaxiA')
+        condition = (index != 'MaxiA')
+        vectors = vectors[condition]
+        dataframe = dataframe.loc[condition]
+
     # Filter out non-centers if specified
     if center:
         condition = ((dataframe['top_A'] == 1) | (dataframe['top_T'] == 1))
