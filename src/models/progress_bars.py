@@ -56,3 +56,4 @@ class predict_progress(keras.callbacks.Callback):
 
     def on_predict_end(self, logs):
         self.progress.close()
+

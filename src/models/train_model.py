@@ -77,7 +77,7 @@ def setup():
         '--n-examples',
         default = 5000,
         type = int,
-        help = 'Number of examples from each class.\n(Default: 5,000)')
+        help = 'Number of total examples to train on.\n(Default: 5,000)')
     
     parser.add_argument(
         '-o',
@@ -98,7 +98,7 @@ def setup():
         action = 'store_true',
         help = argparse.SUPPRESS)
 
-    # Skip the final 
+    # Skip the final train step.
     parser.add_argument(
         '--skip-final',
         default = False,
@@ -112,9 +112,16 @@ def setup():
         action = 'store_true',
         help = argparse.SUPPRESS)
 
+    # Turn the progress bars off.
+    parser.add_argument(
+        '--min-peak-length',
+        default = 20,
+        type = int,
+        help = argparse.SUPPRESS)
+
     return parser.parse_args()
 
-def label_peaks(dataframe, threshold, min_peak_length = 20):
+def label_peaks(dataframe, threshold, min_peak_length):
     # TODO: Make this better. 
     chromosome_list = dataframe.index.get_level_values('chromosome').to_list()
     chromosome_length = [0]
@@ -155,8 +162,7 @@ def label_peaks(dataframe, threshold, min_peak_length = 20):
 
     return dataframe
 
-def train_dataset(vectors, dataframe, threshold, n_examples, holdout, window, center = False, train_all = False):
-    start = time.time()
+def train_dataset(vectors, dataframe, threshold, n_examples, holdout, window, min_peak_length, center, train_all):
     # Drop rows where there are any nulls.
     condition = vectors.any(axis = 1)
     vectors = vectors[condition]
@@ -167,7 +173,7 @@ def train_dataset(vectors, dataframe, threshold, n_examples, holdout, window, ce
     dataframe = dataframe.assign(label = label)
 
     # Add a peak column based on where ChIP peaks occur.
-    dataframe = label_peaks(dataframe, threshold)
+    dataframe = label_peaks(dataframe, threshold, min_peak_length)
 
     # Remove test holdout chromosome.
     index = dataframe.index.get_level_values('chromosome')
@@ -207,11 +213,7 @@ def train_dataset(vectors, dataframe, threshold, n_examples, holdout, window, ce
     peak_auc = []
 
     model = create_model(window)
-
-    end = time.time()
-    print (f'Dataset Stuff: {end - start:.2f} s')
     for chromosome in chromosomes:
-        print (chromosome)
         results = train_fold(vectors, dataframe, model, n_examples, chromosome, train_all = train_all)
         training_history.append(results['training_history'])
         validation_history.append(results['validation_history'])
@@ -225,7 +227,10 @@ def train_dataset(vectors, dataframe, threshold, n_examples, holdout, window, ce
         js_in_peak.append(results['js_in_peak'])
         peak_auc.append(results['peak_auc'])
 
-    return (model,
+    return (
+        vectors,
+        dataframe,
+        model,
     {
         'training_history': training_history, 
         'validation_history': validation_history, 
@@ -256,8 +261,6 @@ def train_fold(vectors, dataframe, model, n_examples, holdout, batch_size = 32, 
     # Training Data
     train_examples = vectors[index != holdout]
     training_labels = labels[index != holdout]
-    end = time.time()
-    print (f'Training Stuff: {end - start:.2f} s')
 
     # TODO: Also takes about 40 seconds
     # Filter on labels.
@@ -328,7 +331,7 @@ def train_network(training_dataset, model, length, validation_split = 0.1):
     validation_dataset = training_dataset.take(n_validation) 
     training_dataset = training_dataset.skip(n_validation)
 
-    # Create out custom TQDM progress bar for training. 
+    # Create out custom TQDM progress bar for training.
     callback = progress_bars.train_progress(length)
 
     history = model.fit(
@@ -354,20 +357,21 @@ def validate_network(validation_dataset, model, length):
 # cross validation step. 
 def train_final(vectors, dataframe, model, batch_size = 32):
     # Extract examples and labels.
-    examples = vectors
     labels = dataframe['label'].to_numpy()
 
     # Shuffle the order of examples.
-    index = np.random.permutation(len(examples))
-    examples = examples[index]
+    index = np.random.permutation(len(vectors))
+    vectors = vectors[index]
     labels = labels[index]
 
     # Create tensorflow dataset and batch.
-    data = tf.data.Dataset.from_tensor_slices((examples, labels))
+    data = tf.data.Dataset.from_tensor_slices((vectors, labels))
     data = data.batch(batch_size)
 
-    length = int(np.ceil(len(examples)/batch_size))
+    # Create progress bar.
+    length = int(np.ceil(len(vectors)/batch_size))
     callback = progress_bars.train_progress(length)
+
     model.fit(
         data,
         epochs = 10, 
@@ -467,8 +471,7 @@ def interpolate_curve(x, y, area, average = False):
     return mean_x, mean_y, lower_y, upper_y, mean_area, std_area
 
 def plot(
-    filename, 
-    data,
+    filename,
     training_history, 
     validation_history, 
     false_positive_rate, 
@@ -675,7 +678,7 @@ def main():
 
     # Reading data. 
     start = utils.start_time('Reading Data')
-    data = pd.read_hdf(arguments.data_frame)
+    dataframe = pd.read_hdf(arguments.data_frame)
     vectors = np.load(arguments.input)
     with open(arguments.metadata) as infile:
         metadata = json.load(infile)
@@ -684,13 +687,14 @@ def main():
 
     # Training model.
     start = utils.start_time()
-    model, results = train_dataset(
+    vectors, dataframe, model, results = train_dataset(
         vectors = vectors,
-        dataframe = data,
+        dataframe = dataframe,
         threshold = arguments.fold_change,
         n_examples = arguments.n_examples,
         holdout = arguments.holdout, 
         window = window,
+        min_peak_length = arguments.min_peak_length,
         center = arguments.center,
         train_all = arguments.train_all)
     utils.end_time(start) 
@@ -704,7 +708,7 @@ def main():
         filename = os.path.join(reports_folder, f'{arguments.prefix}_model_performance.pdf')
     else:
         filename = os.path.join(reports_folder, 'model_performance.pdf')
-    plot(filename, data, **results)
+    plot(filename, **results)
 
     if not arguments.skip_final:
         start = utils.start_time('Training Final Model')
@@ -713,7 +717,7 @@ def main():
             filename = os.path.join(models_folder, f'{arguments.prefix}_model.h5')
         else:
             filename = os.path.join(models_folder, 'model.h5')
-        train_final(data, model)
+        train_final(vectors, dataframe, model)
         model.save(filename)
         utils.end_time(start)
 
