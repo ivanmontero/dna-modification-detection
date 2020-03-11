@@ -179,7 +179,7 @@ def train_dataset(vectors, dataframe, threshold, n_examples, holdout, window, mi
     index = dataframe.index.get_level_values('chromosome')
     chromosomes = dataframe.index.unique(level = 'chromosome').to_list()
     if holdout:
-        chromosomes = chromosomes.remove(holdout)
+        chromosomes.remove(holdout)
         condition = (index != holdout)
         vectors = vectors[condition]
         dataframe = dataframe.loc[condition]
@@ -187,7 +187,7 @@ def train_dataset(vectors, dataframe, threshold, n_examples, holdout, window, mi
     # Remove the Maxi_A chromosome.
     if 'MaxiA' in chromosomes:
         index = dataframe.index.get_level_values('chromosome')
-        chromosomes = chromosomes.remove('MaxiA')
+        chromosomes.remove('MaxiA')
         condition = (index != 'MaxiA')
         vectors = vectors[condition]
         dataframe = dataframe.loc[condition]

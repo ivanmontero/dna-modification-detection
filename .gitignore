@@ -1,3 +1,4 @@
+# Data Files
 data/raw/*
 !data/raw/.gitkeep
 data/interm/*
@@ -10,6 +11,10 @@ models/*
 data/legacy/*
 !data/legacy/.gitkeep
 !models/.gitkeep
+
+# Batch Script Ouputs
+batch/*.e*
+batch/*.o*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
