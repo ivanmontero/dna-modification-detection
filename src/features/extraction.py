@@ -48,13 +48,6 @@ def setup():
         '--prefix', 
         default = False,
         help = 'Output prefix.')
-
-    # Turn off the progress bars when running on a cluster. 
-    parser.add_argument(
-        '--progress-off',
-        default = False,
-        action = 'store_true', 
-        help = argparse.SUPPRESS)
     
     return parser.parse_args()
 
@@ -87,7 +80,7 @@ def windows(chunk, queue, counter, progress):
         start_position = index[start]
         end_position = index[end]
 
-        if (i % interval == 0) & bool(progress):
+        if i % interval == 0:
             with counter.get_lock():
                 counter.value += interval
                 progress.n = counter.value
@@ -101,11 +94,10 @@ def windows(chunk, queue, counter, progress):
         vector = section.flatten(order = 'F')
         vectors[i] = vector
 
-    if progress:
-        with counter.get_lock():
-            counter.value += (i % interval)
-            progress.n = counter.value
-            progress.refresh()
+    with counter.get_lock():
+        counter.value += (i % interval)
+        progress.n = counter.value
+        progress.refresh()
 
     vectors = np.array(vectors)
     nbytes = vectors.nbytes
@@ -211,8 +203,6 @@ def main():
     counter = multiprocessing.Value('i', 0)
     queue = multiprocessing.SimpleQueue()
     progress = tqdm.tqdm(total = total, unit = ' rows', leave = False)
-    if arguments.progress_off:
-        progress = None
 
     # Send off one job for each chunk.
     processes = []

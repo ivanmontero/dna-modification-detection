@@ -1,9 +1,5 @@
 import argparse
 
-# TODO: Importing all the modules takes like 15-20 seconds. The main culprits
-# are tensorflow.keras, matplotlib.backends.backend_pdf.PdfPages, and
-# sklearn.metrics. Use python -X importtime to profile import times, or drop in
-# a time.time() before and after import statements.
 def import_modules():
     print ('Importing Modules')
     # Make the local imports global
@@ -55,7 +51,13 @@ def setup():
         '-i', 
         '--input', 
         required = True,
-        help = 'Input pandas table with feature vectors.')
+        help = 'Input numpy array of feature vectors.')
+
+    parser.add_argument(
+        '-d', 
+        '--data-frame', 
+        required = True,
+        help = 'Input pandas dataframe.')
 
     parser.add_argument(
         '-m', 
@@ -64,7 +66,7 @@ def setup():
         help = 'Metadata for input table.')
 
     parser.add_argument(
-        '-f'
+        '-f',
         '--fold-change',
         default = 10,
         type = float, 
@@ -75,10 +77,10 @@ def setup():
         '--n-examples',
         default = 5000,
         type = int,
-        help = 'Number of examples from each class.\n(Default: 5,000)')
+        help = 'Number of total examples to train on.\n(Default: 5,000)')
     
     parser.add_argument(
-        '-o'
+        '-o',
         '--holdout',
         default = None, 
         help = 'Which chromosome to holdout for testing.\n(Default: None)') 
@@ -96,7 +98,7 @@ def setup():
         action = 'store_true',
         help = argparse.SUPPRESS)
 
-    # Skip the final 
+    # Skip the final train step.
     parser.add_argument(
         '--skip-final',
         default = False,
@@ -110,18 +112,25 @@ def setup():
         action = 'store_true',
         help = argparse.SUPPRESS)
 
+    # Turn the progress bars off.
+    parser.add_argument(
+        '--min-peak-length',
+        default = 20,
+        type = int,
+        help = argparse.SUPPRESS)
+
     return parser.parse_args()
 
-def label_peaks(data, threshold, min_peak_length = 50):
+def label_peaks(dataframe, threshold, min_peak_length):
     # TODO: Make this better. 
-    chromosome_list = data.index.get_level_values('chromosome').to_list()
+    chromosome_list = dataframe.index.get_level_values('chromosome').to_list()
     chromosome_length = [0]
-    for chromosome in data.index.unique('chromosome'):
+    for chromosome in dataframe.index.unique('chromosome'):
         chromosome_length.append(chromosome_list.count(chromosome))
     chromosome_length = np.cumsum(chromosome_length)
 
-    fold_change = data['fold_change'].to_numpy()
-    data['peak_id'] = 0
+    fold_change = dataframe['fold_change'].to_numpy()
+    dataframe = dataframe.assign(peak_id = 0)
     peak_id = 1
 
     for i in range(len(chromosome_length) - 1):
@@ -135,15 +144,15 @@ def label_peaks(data, threshold, min_peak_length = 50):
             # If you are currently in a peak.
             if current_fold_change > threshold:
                 in_peak = True
-                data.iat[j, -1] = peak_id
+                dataframe.iat[j, -1] = peak_id
 
             # If you have just exited a peak.
             elif in_peak:
                 in_peak = False
                 
                 # If the peak was too small. 
-                if (data["peak_id"] == peak_id).sum() < min_peak_length:
-                    data.loc[data["peak_id"] == peak_id, 'peak_id'] = 0
+                if (dataframe['peak_id'] == peak_id).sum() < min_peak_length:
+                    dataframe.loc[dataframe['peak_id'] == peak_id, 'peak_id'] = 0
                 else:
                     peak_id += 1
 
@@ -151,30 +160,46 @@ def label_peaks(data, threshold, min_peak_length = 50):
         if in_peak:
             peak_id = peak_id + 1
 
-def train_dataset(data, threshold, n_examples, holdout, window, center = False, train_all = False):
+    return dataframe
 
+def train_dataset(vectors, dataframe, threshold, n_examples, holdout, window, min_peak_length, center, train_all):
     # Drop rows where there are any nulls.
-    data.dropna(inplace = True)
+    condition = vectors.any(axis = 1)
+    vectors = vectors[condition]
+    dataframe = dataframe.loc[condition]
 
     # Add a label column based on fold change threshold.
-    data.loc[data['fold_change'] >= threshold, 'labels'] = 1
-    data.loc[data['fold_change'] < threshold, 'labels'] = 0
+    label = (dataframe['fold_change'] >= threshold).astype(int)
+    dataframe = dataframe.assign(label = label)
 
     # Add a peak column based on where ChIP peaks occur.
-    label_peaks(data, threshold)
+    dataframe = label_peaks(dataframe, threshold, min_peak_length)
 
-    # Remove test holdout chromosome. 
-    chromosomes = data.index.unique(level = 'chromosome').to_list()
+    # Remove test holdout chromosome.
+    index = dataframe.index.get_level_values('chromosome')
+    chromosomes = dataframe.index.unique(level = 'chromosome').to_list()
     if holdout:
-        chromosomes = chromosomes.remove(holdout)
-        data = data.loc[[chromosomes], :, :]
+        chromosomes.remove(holdout)
+        condition = (index != holdout)
+        vectors = vectors[condition]
+        dataframe = dataframe.loc[condition]
+
+    # Remove the Maxi_A chromosome.
+    if 'MaxiA' in chromosomes:
+        index = dataframe.index.get_level_values('chromosome')
+        chromosomes.remove('MaxiA')
+        condition = (index != 'MaxiA')
+        vectors = vectors[condition]
+        dataframe = dataframe.loc[condition]
 
     # Filter out non-centers if specified
     if center:
-        data = data[(data["top_A"] == 1) | (data["top_T"] == 1)]
+        condition = ((dataframe['top_A'] == 1) | (dataframe['top_T'] == 1))
+        vectors = vectors[condition]
+        dataframe = dataframe.loc[condition]
 
     # Percent of rows which are in peaks.
-    peak_percent = data['labels'].sum()/len(data)
+    peak_percent = dataframe['label'].sum()/len(dataframe)
 
     # Training History
     training_history = []
@@ -197,7 +222,7 @@ def train_dataset(data, threshold, n_examples, holdout, window, center = False, 
 
     model = create_model(window)
     for chromosome in chromosomes:
-        results = train_fold(data, model, n_examples, chromosome, train_all = train_all)
+        results = train_fold(vectors, dataframe, model, n_examples, chromosome, train_all = train_all)
         training_history.append(results['training_history'])
         validation_history.append(results['validation_history'])
         false_positive_rate.append(results['false_positive_rate'])
@@ -210,7 +235,10 @@ def train_dataset(data, threshold, n_examples, holdout, window, center = False, 
         js_in_peak.append(results['js_in_peak'])
         peak_auc.append(results['peak_auc'])
 
-    return (model,
+    return (
+        vectors,
+        dataframe,
+        model,
     {
         'training_history': training_history, 
         'validation_history': validation_history, 
@@ -226,39 +254,37 @@ def train_dataset(data, threshold, n_examples, holdout, window, center = False, 
         'peak_auc': peak_auc
     })
 
-def train_fold(data, model, n_examples, holdout, batch_size = 32, train_all = False):
+def train_fold(vectors, dataframe, model, n_examples, holdout, batch_size = 32, train_all = False):
 
-    # Separate into training and validation. 
-    chromosomes = data.index.unique(level = 'chromosome').to_list()
-    chromosomes.remove(holdout)
-    training_fold = data.loc[chromosomes, :, :]
-    validation_fold = data.loc[holdout, :, :]
+    # Separate into training and validation.
+    index = dataframe.index.get_level_values('chromosome')
+    labels = dataframe['label'].to_numpy()
 
+    # Validation Data
+    validation_examples = vectors[index == holdout]
+    validation_labels = labels[index == holdout]
+    peak_ids = dataframe['peak_id'].to_numpy()[index == holdout]
+
+    # TODO: Takes about 40 seconds on the whole dataset, kinda slow. 
+    # Training Data
+    train_examples = vectors[index != holdout]
+    training_labels = labels[index != holdout]
+
+    # TODO: Also takes about 40 seconds
     # Filter on labels.
-    positive = training_fold.loc[training_fold['labels'] == 1]
-    negative = training_fold.loc[training_fold['labels'] == 0]
+    positive_examples = train_examples[training_labels == 1]
+    negative_examples = train_examples[training_labels == 0]
     
     # Sample n examples.
     n_examples = int(n_examples/2)
     if not train_all: 
-        positive = sample(positive, n_examples)
-        negative = sample(negative, n_examples)
-
-    # Convert to numpy.
-    # Unfortunately there's this weird thing where if the numpy array has lists
-    # of uneven length, or in our case, Nones, then it makes a weird array that
-    # tensorflow doesn't like. We first have to convert the numpy array of numpy
-    # arrays into a list of numpy arrays then convert it back. There must be 
-    # something more elegant but this is what works for now.
-    positive_examples = np.array(list(positive['vectors'].to_numpy()))
-    positive_labels = positive['labels'].to_numpy()
-    negative_examples = np.array(list(negative['vectors'].to_numpy()))
-    negative_labels = negative['labels'].to_numpy()
-    validation_examples = np.array(list(validation_fold['vectors'].to_numpy()))
-    validation_labels = validation_fold['labels'].to_numpy()
+        positive_examples = sample(positive_examples, n_examples)
+        negative_examples = sample(negative_examples, n_examples)
 
     # Aggregate training examples and labels.
     train_examples = np.vstack([positive_examples, negative_examples])
+    positive_labels = np.ones(len(positive_examples))
+    negative_labels = np.zeros(len(negative_examples))
     train_labels = np.hstack([positive_labels, negative_labels])
 
     # Shuffle the order of examples.
@@ -281,14 +307,13 @@ def train_fold(data, model, n_examples, holdout, batch_size = 32, train_all = Fa
     training_history, validation_history = train_network(train_dataset, model, train_length)
     validation_scores = validate_network(validation_dataset, model, validation_length)
     model.reset_states()
-    
+
     false_positive_rate, true_positive_rate, thresholds = metrics.roc_curve(validation_labels, validation_scores)
     roc_auc = metrics.auc(false_positive_rate, true_positive_rate)
-    
+
     precision, recall, thresholds = metrics.precision_recall_curve(validation_labels, validation_scores)
     average_precision = metrics.average_precision_score(validation_labels, validation_scores)
 
-    peak_ids = validation_fold['peak_id'].to_numpy()
     peaks_with_j, js_in_peak = peak_j_curve(peak_ids, validation_scores)
     peak_auc = metrics.auc(peaks_with_j, js_in_peak)
 
@@ -314,7 +339,7 @@ def train_network(training_dataset, model, length, validation_split = 0.1):
     validation_dataset = training_dataset.take(n_validation) 
     training_dataset = training_dataset.skip(n_validation)
 
-    # Create out custom TQDM progress bar for training. 
+    # Create out custom TQDM progress bar for training.
     callback = progress_bars.train_progress(length)
 
     history = model.fit(
@@ -338,84 +363,86 @@ def validate_network(validation_dataset, model, length):
 # TODO: Right now it trains on everything in the end. Maybe that's too much? 
 # Maybe it won't generalize? Tough to say, we should probably check using the 
 # cross validation step. 
-def train_final(data, model, batch_size = 32):
+def train_final(vectors, dataframe, model, batch_size = 32):
     # Extract examples and labels.
-    examples = np.array(list(data['vectors'].to_numpy()))
-    labels = data['labels'].to_numpy()
+    labels = dataframe['label'].to_numpy()
 
     # Shuffle the order of examples.
-    index = np.random.permutation(len(examples))
-    examples = examples[index]
+    index = np.random.permutation(len(vectors))
+    vectors = vectors[index]
     labels = labels[index]
 
     # Create tensorflow dataset and batch.
-    data = tf.data.Dataset.from_tensor_slices((examples, labels))
+    data = tf.data.Dataset.from_tensor_slices((vectors, labels))
     data = data.batch(batch_size)
 
-    length = int(np.ceil(len(examples)/batch_size))
+    # Create progress bar.
+    length = int(np.ceil(len(vectors)/batch_size))
     callback = progress_bars.train_progress(length)
+
     model.fit(
         data,
         epochs = 10, 
         verbose = 0, 
         callbacks = [callback])
 
-def sample(data, n_examples):
-    if len(data) <= n_examples:
-        return data
+def sample(vectors, n_examples):
+    if len(vectors) <= n_examples:
+        return vectors
     else:
-        return data.sample(n_examples)
+        index = np.arange(len(vectors))
+        selection = np.random.choice(index, n_examples, replace = False)
+        return vectors[selection]
 
 # We will define our model as a multi-layer densely connected neural network
 # with dropout between the layers.
 def create_model(input_dim):
     model = keras.Sequential()
-    model.add(keras.layers.Dense(300, input_dim = input_dim, activation="relu"))
+    model.add(keras.layers.Dense(300, input_dim = input_dim, activation='relu'))
     model.add(keras.layers.Dropout(0.5))
-    model.add(keras.layers.Dense(150, activation="relu"))
+    model.add(keras.layers.Dense(150, activation='relu'))
     model.add(keras.layers.Dropout(0.5))
-    model.add(keras.layers.Dense(50, activation="relu"))
-    model.add(keras.layers.Dense(1, activation="sigmoid"))
+    model.add(keras.layers.Dense(50, activation='relu'))
+    model.add(keras.layers.Dense(1, activation='sigmoid'))
     model.compile(
-        optimizer="adam", 
-        loss="binary_crossentropy", 
+        optimizer='adam', 
+        loss='binary_crossentropy', 
         metrics = ['accuracy'])
 
     return model
 
-# TODO: Speed this up a bit.
 def peak_j_curve(peak_ids, y_scores):
+    # Sort the y_scores largest to smallest and order peak_ids by its index.
+    sort_index = np.argsort(y_scores, kind="mergesort")[::-1]
+    peak_ids = peak_ids[sort_index]
+    y_scores = y_scores[sort_index]
+
+    # Compute cumulative number of unique peaks as we lower the threshold.
+    unique_peaks = {0}
+    count_peaks = np.zeros(len(peak_ids))
+    for i in range(len(peak_ids)):
+        unique_peaks.add(peak_ids[i])
+        count_peaks[i] = len(unique_peaks) - 1
+
+    # Compute percent peaks with J.
     min_peak = min(peak_ids[peak_ids > 0])
     max_peak = max(peak_ids)
-    # Add one to be inclusive of the last numbered peak.
     total_peaks = max_peak - min_peak + 1
-    peaks_with_j_array = []
-    js_in_peak_array = []
-    
-    for threshold in np.linspace(0, 1, 1001):
-        valid_js = (y_scores >= threshold)
-        number_js =  valid_js.sum()
-        inside_peaks = (peak_ids > 0)
-        js_in_peak = (valid_js & inside_peaks).sum()
+    peaks_with_j = count_peaks / total_peaks
 
-        peaks_w_j = 0
-        for peak in range(min_peak, max_peak + 1):
-            current_peak = (peak_ids == peak)
-            js_in_current_peak = (current_peak & valid_js).sum()
+    # Compute number of J's in peaks.
+    in_peak = (peak_ids > 0).astype(int)
+    count_js = np.cumsum(in_peak)
+    js_with_peak = count_js / np.arange(1, len(y_scores) + 1)
 
-            if js_in_current_peak > 0:
-                peaks_w_j += 1
+    # Compute unique thresholds and add a 0 threshold.
+    distinct_index = np.where(np.diff(y_scores))[0]
+    threshold_index = np.concatenate([distinct_index, [len(y_scores) - 1]])
 
-        peaks_with_j_array.append(peaks_w_j / total_peaks)
-        js_in_peak_array.append(js_in_peak / number_js)
+    peaks_with_j = np.concatenate([[0], peaks_with_j[threshold_index]])
+    js_with_peak = np.concatenate([[1], js_with_peak[threshold_index]])
 
-    # Doesn't really make sense but it helps with the AUC calculation.
-    # I don't think it would detract from the interpretability too much.
-    # TODO: Think about it some more lol.
-    peaks_with_j_array.append(0)
-    js_in_peak_array.append(1)
-
-    return peaks_with_j_array, js_in_peak_array
+    return peaks_with_j, js_with_peak
 
 def shortest_row(array):
     current = 0
@@ -452,8 +479,7 @@ def interpolate_curve(x, y, area, average = False):
     return mean_x, mean_y, lower_y, upper_y, mean_area, std_area
 
 def plot(
-    filename, 
-    data,
+    filename,
     training_history, 
     validation_history, 
     false_positive_rate, 
@@ -530,8 +556,7 @@ def plot(
                 false_positive_rate[i], 
                 true_positive_rate[i], 
                 linewidth = 1, 
-                alpha = 0.3, 
-                label = f"ROC Fold {i+1} (AUC = {roc_auc[i]:.2f})")
+                alpha = 0.3)
         plt.fill_between(
             mean_x, 
             lower_y, 
@@ -574,8 +599,7 @@ def plot(
                 recall[i], 
                 precision[i], 
                 linewidth = 1,
-                alpha = 0.3,
-                label = f"PR Fold {i+1} (AP = {average_precision[i]:.2f})")
+                alpha = 0.3)
         plt.fill_between(
             mean_x, 
             lower_y, 
@@ -606,7 +630,7 @@ def plot(
         pdf.savefig()
         plt.close()
 
-        mean_x, mean_y, lower_y, upper_y, mean_area, std_area = interpolate_curve(peaks_with_j, js_in_peak, peak_auc, True)
+        mean_x, mean_y, lower_y, upper_y, mean_area, std_area = interpolate_curve(peaks_with_j, js_in_peak, peak_auc)
         
         # Peak J Curve
         plt.figure(
@@ -618,8 +642,7 @@ def plot(
                 peaks_with_j[i], 
                 js_in_peak[i], 
                 linewidth = 1,
-                alpha = 0.3,
-                label = f"Fold {i+1} (AUC = {peak_auc[i]:.2f})")
+                alpha = 0.3)
         plt.fill_between(
             mean_x, 
             lower_y, 
@@ -662,20 +685,24 @@ def main():
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
     # Reading data. 
-    print ('Reading Data')
-    data = pd.read_pickle(arguments.input)
+    start = utils.start_time('Reading Data')
+    dataframe = pd.read_hdf(arguments.data_frame)
+    vectors = np.load(arguments.input)
     with open(arguments.metadata) as infile:
         metadata = json.load(infile)
     window = len(metadata['columns'])
+    utils.end_time(start) 
 
     # Training model.
     start = utils.start_time()
-    model, results = train_dataset(
-        data,
+    vectors, dataframe, model, results = train_dataset(
+        vectors = vectors,
+        dataframe = dataframe,
         threshold = arguments.fold_change,
         n_examples = arguments.n_examples,
         holdout = arguments.holdout, 
         window = window,
+        min_peak_length = arguments.min_peak_length,
         center = arguments.center,
         train_all = arguments.train_all)
     utils.end_time(start) 
@@ -689,17 +716,19 @@ def main():
         filename = os.path.join(reports_folder, f'{arguments.prefix}_model_performance.pdf')
     else:
         filename = os.path.join(reports_folder, 'model_performance.pdf')
-    plot(filename, data, **results)
+    plot(filename, **results)
 
-    start = utils.start_time('Training Final Model')
-    models_folder = os.path.join(project_folder, 'models')
-    if arguments.prefix:
-        filename = os.path.join(models_folder, f'{arguments.prefix}_model.h5')
-    else:
-        filename = os.path.join(models_folder, 'model.h5')
-    train_final(data, model)
-    model.save(filename)
-    utils.end_time(start)
+    if not arguments.skip_final:
+        start = utils.start_time('Training Final Model')
+        models_folder = os.path.join(project_folder, 'models')
+        if arguments.prefix:
+            filename = os.path.join(models_folder, f'{arguments.prefix}_model.h5')
+        else:
+            filename = os.path.join(models_folder, 'model.h5')
+        train_final(vectors, dataframe, model)
+        model.save(filename)
+        utils.end_time(start)
+
     total_time = utils.end_time(total_start, True)
     print (f'{total_time} elapsed in total.')
 
