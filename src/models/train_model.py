@@ -91,7 +91,7 @@ def setup():
         default = False,
         help = 'Output prefix.')
 
-    # Whether to only center on As and Ts'
+    # Whether the final model is trained on only As and Ts
     parser.add_argument(
         '--center',
         default = False,
@@ -363,7 +363,8 @@ def validate_network(validation_dataset, model, length):
 # TODO: Right now it trains on everything in the end. Maybe that's too much? 
 # Maybe it won't generalize? Tough to say, we should probably check using the 
 # cross validation step. 
-def train_final(vectors, dataframe, model, batch_size = 32):
+# TODO: Split to have equal classes?
+def train_final(vectors, dataframe, model, center=False, batch_size = 32):
     # Extract examples and labels.
     labels = dataframe['label'].to_numpy()
 
@@ -371,6 +372,12 @@ def train_final(vectors, dataframe, model, batch_size = 32):
     index = np.random.permutation(len(vectors))
     vectors = vectors[index]
     labels = labels[index]
+
+    # Filter out non-centers if specified
+    if center:
+        condition = ((dataframe['top_A'] == 1) | (dataframe['top_T'] == 1))
+        vectors = vectors[condition]
+        dataframe = dataframe.loc[condition]
 
     # Create tensorflow dataset and batch.
     data = tf.data.Dataset.from_tensor_slices((vectors, labels))
@@ -444,6 +451,17 @@ def peak_j_curve(peak_ids, y_scores):
 
     return peaks_with_j, js_with_peak
 
+def threshold_baselines(ipd_values, fold_change_labels):
+    # IPD threshold
+    ipd_fpr, ipd_tpr, ipd_thresh = metrics.roc_curve(fold_change_labels, ipd_values)
+    # Complex 
+    zero = ipd_valuess[:-6]
+    two = ipd_values[2:-4]
+    six = ipd_values[6:]
+    complex_values = zero+two+six
+    c_fpr, c_tpr, c_thresh = metric.roc_curve(complex_values, fold_change_labels[:-6])
+    return (ipd_fpr, ipd_tpr, ipd_thresh), (c_fpr, c_tpr, c_thresh)
+
 def shortest_row(array):
     current = 0
     length = len(array[0])
@@ -492,16 +510,32 @@ def plot(
     peaks_with_j,
     js_in_peak,
     peak_auc,
+    at_training_history, 
+    at_validation_history, 
+    at_false_positive_rate, 
+    at_true_positive_rate, 
+    at_roc_auc, 
+    at_precision,
+    at_recall, 
+    at_average_precision,
+    at_peak_percent,
+    at_peaks_with_j,
+    at_js_in_peak,
+    at_peak_auc,
     name = 'Neural Network'):
 
     with PdfPages(filename) as pdf:
         folds = len(training_history)
         mean_training = np.mean(training_history, axis = 0)
         mean_validation = np.mean(validation_history, axis = 0)
+        mean_at_training = np.mean(at_training_history, axis = 0)
+        mean_at_validation = np.mean(at_validation_history, axis = 0)
         epochs = range(1, len(mean_training) + 1)
 
         std_training = np.std(training_history, axis = 0)
         std_validation = np.std(validation_history, axis = 0)
+        std_at_training = np.std(at_training_history, axis = 0)
+        std_at_validation = np.std(at_validation_history, axis = 0)
 
         # Training Plot
         plt.figure(
@@ -513,7 +547,7 @@ def plot(
             mean_training, 
             color = 'C0',
             linewidth = 2,
-            label = f'Training Accuracy (Final = {mean_training[-1]:.2f})')
+            label = f'All Training Accuracy (Final = {mean_training[-1]:.2f})')
         plt.fill_between(
             epochs, 
             mean_training + std_training, 
@@ -525,12 +559,36 @@ def plot(
             mean_validation, 
             color = 'C1',  
             linewidth = 2,
-            label = f'Validation Accuracy (Final = {mean_validation[-1]:.2f})')
+            label = f'All Validation Accuracy (Final = {mean_validation[-1]:.2f})')
         plt.fill_between(
             epochs, 
             mean_validation + std_training, 
             mean_validation - std_training,
             color = 'C1', 
+            alpha = 0.2)
+        plt.plot(
+            epochs, 
+            mean_at_training, 
+            color = 'C2',
+            linewidth = 2,
+            label = f'AT Training Accuracy (Final = {mean_at_training[-1]:.2f})')
+        plt.fill_between(
+            epochs, 
+            mean_at_training + std_at_training, 
+            mean_at_training - std_at_training, 
+            color = 'C2', 
+            alpha = 0.2)
+        plt.plot(
+            epochs, 
+            mean_validation, 
+            color = 'C3',  
+            linewidth = 2,
+            label = f'AT Validation Accuracy (Final = {mean_at_validation[-1]:.2f})')
+        plt.fill_between(
+            epochs, 
+            mean_at_validation + std_at_training, 
+            mean_at_validation - std_at_training,
+            color = 'C3', 
             alpha = 0.2)
         plt.legend(
             bbox_to_anchor = (1.05, 1), 
@@ -544,8 +602,8 @@ def plot(
         plt.close()
 
         mean_x, mean_y, lower_y, upper_y, mean_area, std_area = interpolate_curve(false_positive_rate, true_positive_rate, roc_auc)
+        # at_mean_x, at_mean_y, at_lower_y, at_upper_y, at_mean_area, at_std_area = interpolate_curve(at_false_positive_rate, at_true_positive_rate, at_roc_auc)
 
-    
         # ROC Curve
         plt.figure(
             figsize = (8, 4), 
@@ -694,8 +752,9 @@ def main():
     utils.end_time(start) 
 
     # Training model.
+    print("Training model (all bases)")
     start = utils.start_time()
-    vectors, dataframe, model, results = train_dataset(
+    all_vectors, all_dataframe, all_model, all_results = train_dataset(
         vectors = vectors,
         dataframe = dataframe,
         threshold = arguments.fold_change,
@@ -703,9 +762,26 @@ def main():
         holdout = arguments.holdout, 
         window = window,
         min_peak_length = arguments.min_peak_length,
-        center = arguments.center,
+        center = False,
         train_all = arguments.train_all)
     utils.end_time(start) 
+
+    print("Training model (only As and Ts)")
+    start = utils.start_time()
+    at_vectors, at_dataframe, at_model, at_results = train_dataset(
+        vectors = vectors,
+        dataframe = dataframe,
+        threshold = arguments.fold_change,
+        n_examples = arguments.n_examples,
+        holdout = arguments.holdout, 
+        window = window,
+        min_peak_length = arguments.min_peak_length,
+        center = True,
+        train_all = arguments.train_all)
+    utils.end_time(start) 
+
+    results = all_results.copy()
+    results.update({"at_" + r: at_results[r] for r in at_results})
 
     # Plotting performance. 
     print ('Plotting Performance')
@@ -725,7 +801,7 @@ def main():
             filename = os.path.join(models_folder, f'{arguments.prefix}_model.h5')
         else:
             filename = os.path.join(models_folder, 'model.h5')
-        train_final(vectors, dataframe, model)
+        train_final(vectors, dataframe, model, arguments.center)
         model.save(filename)
         utils.end_time(start)
 
