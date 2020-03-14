@@ -451,8 +451,9 @@ def peak_j_curve(peak_ids, y_scores):
 
     return peaks_with_j, js_with_peak
 
-def threshold_baselines(ipd_values, fold_change_labels):
-    # IPD threshold
+def threshold_baselines(bottom_ipd_values, top_ipd_values, fold_change_labels):
+    ipd_values = np.concatenate([bottom_ipd_values.to_numpy(), top_ipd_values.to_numpy()], axis=1).max(axis=1)
+    # Simple threshold
     ipd_fpr, ipd_tpr, ipd_thresh = metrics.roc_curve(fold_change_labels, ipd_values)
     # Complex 
     zero = ipd_valuess[:-6]
