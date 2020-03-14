@@ -451,17 +451,32 @@ def peak_j_curve(peak_ids, y_scores):
 
     return peaks_with_j, js_with_peak
 
-def threshold_baselines(bottom_ipd_values, top_ipd_values, fold_change_labels):
-    ipd_values = np.concatenate([bottom_ipd_values.to_numpy(), top_ipd_values.to_numpy()], axis=1).max(axis=1)
-    # Simple threshold
-    ipd_fpr, ipd_tpr, ipd_thresh = metrics.roc_curve(fold_change_labels, ipd_values)
-    # Complex 
-    zero = ipd_valuess[:-6]
-    two = ipd_values[2:-4]
-    six = ipd_values[6:]
-    complex_values = zero+two+six
-    c_fpr, c_tpr, c_thresh = metric.roc_curve(complex_values, fold_change_labels[:-6])
-    return (ipd_fpr, ipd_tpr, ipd_thresh), (c_fpr, c_tpr, c_thresh)
+def simple_threshold(bottom_ipd_values, top_ipd_values, fold_change_labels):
+    ipd_values = np.maximum(bottom_ipd_values.to_numpy(), top_ipd_values.to_numpy())
+    fpr, tpr, thresh = metrics.roc_curve(fold_change_labels, ipd_values)
+    auc = metrics.auc(fpr, tpr)
+    return (fpr, tpr, auc)
+
+def complex_threshold(bottom_ipd_values, top_ipd_values, fold_change_labels):
+    bottom_ipd_values = bottom_ipd_values.to_numpy()
+    top_ipd_values = top_ipd_values.to_numpy()
+    # Top: +6              +2      +0
+    # Pos:  0   1   2   3   4   5   6
+    # Bot: +0      +2              +6
+    tsix = top_ipd_values[:-6]
+    ttwo = top_ipd_values[4:-2]
+    tzero = top_ipd_values[6:]
+    bzero = bottom_ipd_values[:-6]
+    btwo = bottom_ipd_values[2:-4]
+    bsix = bottom_ipd_values[6:]
+    tcomp = tsix + ttwo + tzero
+    bcomp = bzero + btwo + bsix
+    maxed = min(bottom_ipd_values.min(), top_ipd_values.min()) * np.ones_like(bottom_ipd_values)
+    maxed[6:] = np.maximum(maxed[6:], tcomp)
+    maxed[:-6] = np.maximum(maxed[:-6], bcomp)
+    fpr, tpr, thresh = metrics.roc_curve(fold_change_labels, maxed)
+    auc = metrics.auc(fpr, tpr)
+    return (fpr, tpr, auc)
 
 def shortest_row(array):
     current = 0
@@ -523,6 +538,8 @@ def plot(
     at_peaks_with_j,
     at_js_in_peak,
     at_peak_auc,
+    simple_roc,
+    complex_roc,
     name = 'Neural Network'):
 
     with PdfPages(filename) as pdf:
@@ -860,6 +877,91 @@ def plot(
         pdf.savefig()
         plt.close()
 
+        print(simple_roc)
+        mean_x, mean_y, lower_y, upper_y, mean_area, std_area = interpolate_curve([simple_roc[0]], [simple_roc[1]], [simple_roc[2]])
+
+        # ROC Curve
+        plt.figure(
+            figsize = (8, 4), 
+            dpi = 150, 
+            facecolor = 'white')
+        plt.plot(
+            simple_roc[0], 
+            simple_roc[1], 
+            linewidth = 1, 
+            alpha = 0.3)
+        plt.fill_between(
+            mean_x, 
+            lower_y, 
+            upper_y, 
+            color = 'grey', 
+            alpha = 0.2, 
+            label = r'$\pm \sigma$')
+        plt.plot(
+            mean_x, 
+            mean_y, 
+            color = 'C0',
+            linewidth = 2,
+            label = fr'Mean ROC (AUC = {mean_area:.2f} $\pm$ {std_area:.2f})')
+        plt.plot(
+            [0, 1], 
+            [0, 1], 
+            linestyle = '--', 
+            color = 'black')
+        plt.legend(
+            bbox_to_anchor = (1.05, 1), 
+            loc = 'upper left')
+        plt.title(f'Simple ROC with {name}')
+        plt.xlabel('False Positive Rate')
+        plt.xlim([-0.1, 1.1])
+        plt.ylabel('True Positive Rate')
+        plt.ylim([-0.1,1.1])
+        plt.tight_layout()
+        pdf.savefig()
+        plt.close()
+
+        mean_x, mean_y, lower_y, upper_y, mean_area, std_area = interpolate_curve([complex_roc[0]], [complex_roc[1]], [complex_roc[2]])
+
+        # ROC Curve
+        plt.figure(
+            figsize = (8, 4), 
+            dpi = 150, 
+            facecolor = 'white')
+        plt.plot(
+            complex_roc[0], 
+            complex_roc[1], 
+            linewidth = 1, 
+            alpha = 0.3)
+        plt.fill_between(
+            mean_x, 
+            lower_y, 
+            upper_y, 
+            color = 'grey', 
+            alpha = 0.2, 
+            label = r'$\pm \sigma$')
+        plt.plot(
+            mean_x, 
+            mean_y, 
+            color = 'C0',
+            linewidth = 2,
+            label = fr'Mean ROC (AUC = {mean_area:.2f} $\pm$ {std_area:.2f})')
+        plt.plot(
+            [0, 1], 
+            [0, 1], 
+            linestyle = '--', 
+            color = 'black')
+        plt.legend(
+            bbox_to_anchor = (1.05, 1), 
+            loc = 'upper left')
+        plt.title(f'Complex ROC with {name}')
+        plt.xlabel('False Positive Rate')
+        plt.xlim([-0.1, 1.1])
+        plt.ylabel('True Positive Rate')
+        plt.ylim([-0.1,1.1])
+        plt.tight_layout()
+        pdf.savefig()
+        plt.close()
+
 def main():
     # Get argparse arguments. 
     arguments = setup()
@@ -879,6 +981,10 @@ def main():
         metadata = json.load(infile)
     window = len(metadata['columns'])
     utils.end_time(start) 
+
+    print("Computing thresholding baselines")
+    simple_roc = simple_threshold(dataframe["top_ipd"], dataframe["bottom_ipd"], dataframe['fold_change'] >= arguments.fold_change)
+    complex_roc = complex_threshold(dataframe["top_ipd"], dataframe["bottom_ipd"], dataframe['fold_change'] >= arguments.fold_change)
 
     # Training model.
     print("Training model (all bases)")
@@ -911,6 +1017,8 @@ def main():
 
     results = all_results.copy()
     results.update({"at_" + r: at_results[r] for r in at_results})
+    results["simple_roc"] = simple_roc
+    results["complex_roc"] = complex_roc
 
     # Plotting performance. 
     print ('Plotting Performance')
