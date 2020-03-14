@@ -571,7 +571,7 @@ def plot(
             mean_at_training, 
             color = 'C2',
             linewidth = 2,
-            label = f'AT Training Accuracy (Final = {mean_at_training[-1]:.2f})')
+            label = f'A/T Training Accuracy (Final = {mean_at_training[-1]:.2f})')
         plt.fill_between(
             epochs, 
             mean_at_training + std_at_training, 
@@ -583,7 +583,7 @@ def plot(
             mean_validation, 
             color = 'C3',  
             linewidth = 2,
-            label = f'AT Validation Accuracy (Final = {mean_at_validation[-1]:.2f})')
+            label = f'A/T Validation Accuracy (Final = {mean_at_validation[-1]:.2f})')
         plt.fill_between(
             epochs, 
             mean_at_validation + std_at_training, 
@@ -602,7 +602,6 @@ def plot(
         plt.close()
 
         mean_x, mean_y, lower_y, upper_y, mean_area, std_area = interpolate_curve(false_positive_rate, true_positive_rate, roc_auc)
-        # at_mean_x, at_mean_y, at_lower_y, at_upper_y, at_mean_area, at_std_area = interpolate_curve(at_false_positive_rate, at_true_positive_rate, at_roc_auc)
 
         # ROC Curve
         plt.figure(
@@ -636,7 +635,7 @@ def plot(
         plt.legend(
             bbox_to_anchor = (1.05, 1), 
             loc = 'upper left')
-        plt.title(f'{folds} Fold ROC with {name}')
+        plt.title(f'{folds} Fold ROC with {name} (All Bases)')
         plt.xlabel('False Positive Rate')
         plt.xlim([-0.1, 1.1])
         plt.ylabel('True Positive Rate')
@@ -644,7 +643,49 @@ def plot(
         plt.tight_layout()
         pdf.savefig()
         plt.close()
-    
+
+        at_mean_x, at_mean_y, at_lower_y, at_upper_y, at_mean_area, at_std_area = interpolate_curve(at_false_positive_rate, at_true_positive_rate, at_roc_auc)
+        # ROC Curve
+        plt.figure(
+            figsize = (8, 4), 
+            dpi = 150, 
+            facecolor = 'white')
+        for i in range(len(at_false_positive_rate)):
+            plt.plot(
+                at_false_positive_rate[i], 
+                at_true_positive_rate[i], 
+                linewidth = 1, 
+                alpha = 0.3)
+        plt.fill_between(
+            at_mean_x, 
+            at_lower_y, 
+            at_upper_y, 
+            color = 'grey', 
+            alpha = 0.2, 
+            label = r'$\pm \sigma$')
+        plt.plot(
+            at_mean_x, 
+            at_mean_y, 
+            color = 'C0',
+            linewidth = 2,
+            label = fr'Mean ROC (AUC = {at_mean_area:.2f} $\pm$ {at_std_area:.2f})')
+        plt.plot(
+            [0, 1], 
+            [0, 1], 
+            linestyle = '--', 
+            color = 'black')
+        plt.legend(
+            bbox_to_anchor = (1.05, 1), 
+            loc = 'upper left')
+        plt.title(f'{folds} Fold ROC with {name} (A/T Bases)')
+        plt.xlabel('False Positive Rate')
+        plt.xlim([-0.1, 1.1])
+        plt.ylabel('True Positive Rate')
+        plt.ylim([-0.1,1.1])
+        plt.tight_layout()
+        pdf.savefig()
+        plt.close()
+
         mean_x, mean_y, lower_y, upper_y, mean_area, std_area = interpolate_curve(recall, precision, average_precision)
         
         # Precision Recall Curve
@@ -679,7 +720,7 @@ def plot(
         plt.legend(
             bbox_to_anchor = (1.05, 1), 
             loc = 'upper left')
-        plt.title(f'{folds} Fold PR with {name}')
+        plt.title(f'{folds} Fold PR with {name} (All Bases)')
         plt.xlabel('Recall')
         plt.xlim([-0.1, 1.1])
         plt.ylabel('Precision')
@@ -687,6 +728,50 @@ def plot(
         plt.tight_layout()
         pdf.savefig()
         plt.close()
+
+        at_mean_x, at_mean_y, at_lower_y, at_upper_y, at_mean_area, at_std_area = interpolate_curve(at_recall, at_precision, at_average_precision)
+        
+        # Precision Recall Curve
+        plt.figure(
+            figsize = (8, 4), 
+            dpi = 150, 
+            facecolor = 'white')
+        for i in range(len(at_recall)):
+            plt.plot(
+                at_recall[i], 
+                at_precision[i], 
+                linewidth = 1,
+                alpha = 0.3)
+        plt.fill_between(
+            at_mean_x, 
+            at_lower_y, 
+            at_upper_y, 
+            color = 'grey', 
+            alpha = 0.2, 
+            label = r'$\pm \sigma$')
+        plt.plot(
+            at_mean_x, 
+            at_mean_y, 
+            color = 'C0', 
+            linewidth = 2,
+            label = fr'Mean PR (AP = {at_mean_area:.2f} $\pm$ {at_std_area:.2f})')
+        plt.plot(
+            [0, 1], 
+            [at_peak_percent, at_peak_percent], 
+            linestyle = '--', 
+            color = 'black')
+        plt.legend(
+            bbox_to_anchor = (1.05, 1), 
+            loc = 'upper left')
+        plt.title(f'{folds} Fold PR with {name} (A/T Bases)')
+        plt.xlabel('Recall')
+        plt.xlim([-0.1, 1.1])
+        plt.ylabel('Precision')
+        plt.ylim([-0.1,1.1])
+        plt.tight_layout()
+        pdf.savefig()
+        plt.close()
+
 
         mean_x, mean_y, lower_y, upper_y, mean_area, std_area = interpolate_curve(peaks_with_j, js_in_peak, peak_auc)
         
@@ -722,7 +807,50 @@ def plot(
         plt.legend(
             bbox_to_anchor = (1.05, 1), 
             loc = 'upper left')
-        plt.title(f'{folds} Fold Peak Recall with {name}')
+        plt.title(f'{folds} Fold Peak Recall with {name} (All Bases)')
+        plt.xlabel('% Peaks with J')
+        plt.xlim([-0.1, 1.1])
+        plt.ylabel('% Js in Peak')
+        plt.ylim([-0.1,1.1])
+        plt.tight_layout()
+        pdf.savefig()
+        plt.close()
+
+        at_mean_x, at_mean_y, at_lower_y, at_upper_y, at_mean_area, at_std_area = interpolate_curve(at_peaks_with_j, at_js_in_peak, at_peak_auc)
+        
+        # Peak J Curve
+        plt.figure(
+            figsize = (8, 4), 
+            dpi = 150, 
+            facecolor = 'white')
+        for i in range(len(at_peaks_with_j)):
+            plt.plot(
+                at_peaks_with_j[i], 
+                at_js_in_peak[i], 
+                linewidth = 1,
+                alpha = 0.3)
+        plt.fill_between(
+            at_mean_x, 
+            at_lower_y, 
+            at_upper_y, 
+            color = 'grey', 
+            alpha = 0.2, 
+            label = r'$\pm \sigma$')
+        plt.plot(
+            at_mean_x, 
+            at_mean_y, 
+            color = 'C0', 
+            linewidth = 2,
+            label = fr'Mean AUC = {at_mean_area:.2f} $\pm$ {at_std_area:.2f}')
+        plt.plot(
+            [0, 1], 
+            [at_peak_percent, at_peak_percent], 
+            linestyle = '--', 
+            color = 'black')
+        plt.legend(
+            bbox_to_anchor = (1.05, 1), 
+            loc = 'upper left')
+        plt.title(f'{folds} Fold Peak Recall with {name} (A/T Bases)')
         plt.xlabel('% Peaks with J')
         plt.xlim([-0.1, 1.1])
         plt.ylabel('% Js in Peak')
