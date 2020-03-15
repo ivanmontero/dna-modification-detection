@@ -456,7 +456,7 @@ def threshold_baselines(bottom_ipd_values, top_ipd_values, fold_change_labels):
     # Simple threshold
     ipd_fpr, ipd_tpr, ipd_thresh = metrics.roc_curve(fold_change_labels, ipd_values)
     # Complex 
-    zero = ipd_valuess[:-6]
+    zero = ipd_values[:-6]
     two = ipd_values[2:-4]
     six = ipd_values[6:]
     complex_values = zero+two+six
