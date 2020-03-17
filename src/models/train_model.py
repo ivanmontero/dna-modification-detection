@@ -3,18 +3,19 @@ import argparse
 def import_modules():
     print ('Importing Modules')
     # Make the local imports global
-    global os
-    global sys
-    global utils
+        
     global progress_bars
-    global PdfPages
-    global plt
-    global keras 
+    global plot_metrics
     global metrics
+    global utils
+    global keras
+    global copy 
+    global json
+    global sys
     global tf
     global pd
     global np
-    global json
+    global os
 
     # Import Local Helper Functions
     import os
@@ -27,16 +28,16 @@ def import_modules():
     start = utils.start_time()
     # Local Import
     import progress_bars
+    import plot_metrics
 
     # Import Everything Else
-    from matplotlib.backends.backend_pdf import PdfPages
-    from matplotlib import pyplot as plt
     from tensorflow import keras
     from sklearn import metrics
     import tensorflow as tf
     import pandas as pd
     import numpy as np
     import json
+    import copy
     utils.end_time(start)
 
 # Return argparse arguments. 
@@ -162,262 +163,6 @@ def label_peaks(dataframe, threshold, min_peak_length):
 
     return dataframe
 
-def train_dataset(vectors, dataframe, threshold, n_examples, holdout, window, min_peak_length, center, train_all):
-    # Drop rows where there are any nulls.
-    condition = vectors.any(axis = 1)
-    vectors = vectors[condition]
-    dataframe = dataframe.loc[condition]
-
-    # Add a label column based on fold change threshold.
-    label = (dataframe['fold_change'] >= threshold).astype(int)
-    dataframe = dataframe.assign(label = label)
-
-    # Add a peak column based on where ChIP peaks occur.
-    dataframe = label_peaks(dataframe, threshold, min_peak_length)
-
-    # Remove test holdout chromosome.
-    index = dataframe.index.get_level_values('chromosome')
-    chromosomes = dataframe.index.unique(level = 'chromosome').to_list()
-    if holdout:
-        chromosomes.remove(holdout)
-        condition = (index != holdout)
-        vectors = vectors[condition]
-        dataframe = dataframe.loc[condition]
-
-    # Remove the Maxi_A chromosome.
-    if 'MaxiA' in chromosomes:
-        index = dataframe.index.get_level_values('chromosome')
-        chromosomes.remove('MaxiA')
-        condition = (index != 'MaxiA')
-        vectors = vectors[condition]
-        dataframe = dataframe.loc[condition]
-
-    # Filter out non-centers if specified
-    if center:
-        condition = ((dataframe['top_A'] == 1) | (dataframe['top_T'] == 1))
-        vectors = vectors[condition]
-        dataframe = dataframe.loc[condition]
-
-    # Percent of rows which are in peaks.
-    peak_percent = dataframe['label'].sum()/len(dataframe)
-
-    # Training History
-    training_history = []
-    validation_history = []
-
-    # ROC Curve
-    false_positive_rate = []
-    true_positive_rate = []
-    roc_auc = []
-    
-    # PR Curve
-    recall = []
-    precision = []
-    average_precision = []
-
-    # Peak vs. J curve
-    peaks_with_j = []
-    js_in_peak = []
-    peak_auc = []
-
-    model = create_model(window)
-    for chromosome in chromosomes:
-        results = train_fold(vectors, dataframe, model, n_examples, chromosome, train_all = train_all)
-        training_history.append(results['training_history'])
-        validation_history.append(results['validation_history'])
-        false_positive_rate.append(results['false_positive_rate'])
-        true_positive_rate.append(results['true_positive_rate'])
-        roc_auc.append(results['roc_auc'])
-        recall.append(results['recall'])
-        precision.append(results['precision'])
-        average_precision.append(results['average_precision'])
-        peaks_with_j.append(results['peaks_with_j'])
-        js_in_peak.append(results['js_in_peak'])
-        peak_auc.append(results['peak_auc'])
-
-    return (
-        vectors,
-        dataframe,
-        model,
-    {
-        'training_history': training_history, 
-        'validation_history': validation_history, 
-        'false_positive_rate': false_positive_rate, 
-        'true_positive_rate': true_positive_rate, 
-        'roc_auc':roc_auc,
-        'precision': precision, 
-        'recall': recall, 
-        'average_precision': average_precision,
-        'peak_percent': round(peak_percent, 4),
-        'peaks_with_j': peaks_with_j,
-        'js_in_peak': js_in_peak,
-        'peak_auc': peak_auc
-    })
-
-def train_fold(vectors, dataframe, model, n_examples, holdout, batch_size = 32, train_all = False):
-
-    # Separate into training and validation.
-    index = dataframe.index.get_level_values('chromosome')
-    labels = dataframe['label'].to_numpy()
-
-    # Validation Data
-    validation_examples = vectors[index == holdout]
-    validation_labels = labels[index == holdout]
-    peak_ids = dataframe['peak_id'].to_numpy()[index == holdout]
-
-    # TODO: Takes about 40 seconds on the whole dataset, kinda slow. 
-    # Training Data
-    train_examples = vectors[index != holdout]
-    training_labels = labels[index != holdout]
-
-    # TODO: Also takes about 40 seconds
-    # Filter on labels.
-    positive_examples = train_examples[training_labels == 1]
-    negative_examples = train_examples[training_labels == 0]
-    
-    # Sample n examples.
-    n_examples = int(n_examples/2)
-    if not train_all: 
-        positive_examples = sample(positive_examples, n_examples)
-        negative_examples = sample(negative_examples, n_examples)
-
-    # Aggregate training examples and labels.
-    train_examples = np.vstack([positive_examples, negative_examples])
-    positive_labels = np.ones(len(positive_examples))
-    negative_labels = np.zeros(len(negative_examples))
-    train_labels = np.hstack([positive_labels, negative_labels])
-
-    # Shuffle the order of examples.
-    train_length = len(train_examples)
-    index = np.random.permutation(train_length)
-    train_examples = train_examples[index]
-    train_labels = train_labels[index]
-
-    # Convert to tensorflow dataset.
-    train_dataset = tf.data.Dataset.from_tensor_slices((train_examples, train_labels))
-    train_dataset = train_dataset.batch(batch_size)
-    validation_dataset = tf.data.Dataset.from_tensor_slices(validation_examples)
-    validation_dataset = validation_dataset.batch(batch_size)
-
-    # Compute the number of batches.
-    train_length = int(np.ceil(train_length/batch_size))
-    validation_length = int(np.ceil(len(validation_examples)/batch_size))
-
-    # Train the network, then validate, then reset for the next fold.
-    training_history, validation_history = train_network(train_dataset, model, train_length)
-    validation_scores = validate_network(validation_dataset, model, validation_length)
-    model.reset_states()
-
-    false_positive_rate, true_positive_rate, thresholds = metrics.roc_curve(validation_labels, validation_scores)
-    roc_auc = metrics.auc(false_positive_rate, true_positive_rate)
-
-    precision, recall, thresholds = metrics.precision_recall_curve(validation_labels, validation_scores)
-    average_precision = metrics.average_precision_score(validation_labels, validation_scores)
-
-    peaks_with_j, js_in_peak = peak_j_curve(peak_ids, validation_scores)
-    peak_auc = metrics.auc(peaks_with_j, js_in_peak)
-
-    return {
-        'training_history': training_history, 
-        'validation_history': validation_history, 
-        'false_positive_rate': false_positive_rate, 
-        'true_positive_rate': true_positive_rate, 
-        'roc_auc':roc_auc,
-        'precision': precision[::-1], 
-        'recall': recall[::-1], 
-        'average_precision': average_precision,
-        'peaks_with_j': peaks_with_j,
-        'js_in_peak': js_in_peak,
-        'peak_auc': peak_auc
-    }
-
-# Begin training the neural network, with optional validation data, and model saving.
-def train_network(training_dataset, model, length, validation_split = 0.1):
-    # TODO: There doesn't seem to be a great way to get the length of a
-    # tf.DataSet, so instead we resort to passing the variable.
-    n_validation = int(length*validation_split)
-    validation_dataset = training_dataset.take(n_validation) 
-    training_dataset = training_dataset.skip(n_validation)
-
-    # Create out custom TQDM progress bar for training.
-    callback = progress_bars.train_progress(length)
-
-    history = model.fit(
-        training_dataset,
-        validation_data = validation_dataset,
-        epochs = 10, 
-        verbose = 0, 
-        callbacks = [callback])
-    
-    return history.history['accuracy'], history.history['val_accuracy']
-
-def validate_network(validation_dataset, model, length):
-    callback = progress_bars.predict_progress(length)
-
-    scores = model.predict(
-        validation_dataset,
-        callbacks = [callback])
-
-    return scores.reshape(-1)
-
-# TODO: Right now it trains on everything in the end. Maybe that's too much? 
-# Maybe it won't generalize? Tough to say, we should probably check using the 
-# cross validation step. 
-# TODO: Split to have equal classes?
-def train_final(vectors, dataframe, model, center=False, batch_size = 32):
-    # Extract examples and labels.
-    labels = dataframe['label'].to_numpy()
-
-    # Shuffle the order of examples.
-    index = np.random.permutation(len(vectors))
-    vectors = vectors[index]
-    labels = labels[index]
-
-    # Filter out non-centers if specified
-    if center:
-        condition = ((dataframe['top_A'] == 1) | (dataframe['top_T'] == 1))
-        vectors = vectors[condition]
-        dataframe = dataframe.loc[condition]
-
-    # Create tensorflow dataset and batch.
-    data = tf.data.Dataset.from_tensor_slices((vectors, labels))
-    data = data.batch(batch_size)
-
-    # Create progress bar.
-    length = int(np.ceil(len(vectors)/batch_size))
-    callback = progress_bars.train_progress(length)
-
-    model.fit(
-        data,
-        epochs = 10, 
-        verbose = 0, 
-        callbacks = [callback])
-
-def sample(vectors, n_examples):
-    if len(vectors) <= n_examples:
-        return vectors
-    else:
-        index = np.arange(len(vectors))
-        selection = np.random.choice(index, n_examples, replace = False)
-        return vectors[selection]
-
-# We will define our model as a multi-layer densely connected neural network
-# with dropout between the layers.
-def create_model(input_dim):
-    model = keras.Sequential()
-    model.add(keras.layers.Dense(300, input_dim = input_dim, activation='relu'))
-    model.add(keras.layers.Dropout(0.5))
-    model.add(keras.layers.Dense(150, activation='relu'))
-    model.add(keras.layers.Dropout(0.5))
-    model.add(keras.layers.Dense(50, activation='relu'))
-    model.add(keras.layers.Dense(1, activation='sigmoid'))
-    model.compile(
-        optimizer='adam', 
-        loss='binary_crossentropy', 
-        metrics = ['accuracy'])
-
-    return model
-
 def peak_j_curve(peak_ids, y_scores):
     # Sort the y_scores largest to smallest and order peak_ids by its index.
     sort_index = np.argsort(y_scores, kind="mergesort")[::-1]
@@ -451,517 +196,422 @@ def peak_j_curve(peak_ids, y_scores):
 
     return peaks_with_j, js_with_peak
 
-def simple_threshold(bottom_ipd_values, top_ipd_values, fold_change_labels):
-    ipd_values = np.maximum(bottom_ipd_values.to_numpy(), top_ipd_values.to_numpy())
-    fpr, tpr, thresh = metrics.roc_curve(fold_change_labels, ipd_values)
-    auc = metrics.auc(fpr, tpr)
-    return (fpr, tpr, auc)
+def simple_threshold(dataframe):
+    top_ipd = dataframe['top_ipd'].to_numpy()
+    bottom_ipd = dataframe['bottom_ipd'].to_numpy()
+    scores = np.maximum(top_ipd, bottom_ipd)
 
-def complex_threshold(bottom_ipd_values, top_ipd_values, fold_change_labels):
-    bottom_ipd_values = bottom_ipd_values.to_numpy()
-    top_ipd_values = top_ipd_values.to_numpy()
-    # Top: +6              +2      +0
-    # Pos:  0   1   2   3   4   5   6
-    # Bot: +0      +2              +6
-    tsix = top_ipd_values[:-6]
-    ttwo = top_ipd_values[4:-2]
-    tzero = top_ipd_values[6:]
-    bzero = bottom_ipd_values[:-6]
-    btwo = bottom_ipd_values[2:-4]
-    bsix = bottom_ipd_values[6:]
-    tcomp = tsix + ttwo + tzero
-    bcomp = bzero + btwo + bsix
-    maxed = min(bottom_ipd_values.min(), top_ipd_values.min()) * np.ones_like(bottom_ipd_values)
-    maxed[6:] = np.maximum(maxed[6:], tcomp)
-    maxed[:-6] = np.maximum(maxed[:-6], bcomp)
-    fpr, tpr, thresh = metrics.roc_curve(fold_change_labels, maxed)
-    auc = metrics.auc(fpr, tpr)
-    return (fpr, tpr, auc)
->>>>>>> 06d9a9f9cf62b281072bca71776de0aad55e6fd6
+    return scores
 
-def shortest_row(array):
-    current = 0
-    length = len(array[0])
-    for i in range(len(array)):
-        if len(array[i]) < length:
-            current = i
-    return array[i]
+#      Top: +6              +2      +0    
+# Position:  0   1   2   3   4   5   6   7   8   9   10  11  12
+#   Bottom:                         +0      +2               +6
+def complex_threshold(dataframe):
+    top_ipd = dataframe['top_ipd'].to_numpy()
+    bottom_ipd = dataframe['bottom_ipd'].to_numpy()
 
-def interpolate_curve(x, y, area, average = False):
-    
-    if not average:
-        mean_x = shortest_row(x)
-        interpolate_y = []
-            
-        for i in range(len(x)):
-            new_y = np.interp(mean_x, x[i], y[i])
-            interpolate_y.append(new_y)
-        
-        mean_y = np.mean(interpolate_y, axis = 0)
-        std_y = np.std(interpolate_y, axis = 0)
+    top_zero = top_ipd[6:]
+    top_two = top_ipd[4:-2]
+    top_six = top_ipd[:-6]
 
+    bottom_zero = bottom_ipd[:-6]
+    bottom_two = bottom_ipd[2:-4]
+    bottom_six = bottom_ipd[6:]
+
+    top_sum = top_zero + top_two + top_six
+    bottom_sum = bottom_zero + bottom_two + bottom_six
+    minimum = np.amin(top_sum)
+    scores = np.full(len(dataframe), minimum)
+
+    scores[6:-6] = np.maximum(top_sum[:-6], bottom_sum[6:])
+
+    return scores
+
+def get_metrics(dataframe, scores):
+    condition = ((dataframe['top_A'] == 1) | (dataframe['top_T'] == 1))
+    dataframe = dataframe.loc[condition]
+
+    if len(scores) != len(dataframe):
+        scores = scores[condition]
+
+    labels = dataframe['label'].to_numpy()
+    peak_ids = dataframe['peak_id'].to_numpy()
+
+    false_positive_rate, true_positive_rate, thresholds = metrics.roc_curve(labels, scores)
+    roc_auc = metrics.auc(false_positive_rate, true_positive_rate)
+
+    precision, recall, thresholds = metrics.precision_recall_curve(labels, scores)
+    average_precision = metrics.average_precision_score(labels, scores)
+
+    peaks_with_j, js_with_peak = peak_j_curve(peak_ids, scores)
+    peak_auc = metrics.auc(peaks_with_j, js_with_peak)
+
+    receiver_operator = {
+        'x': false_positive_rate,
+        'y': true_positive_rate,
+        'area': roc_auc
+    }
+
+    # The recall and precision have to be reversed because of something to do
+    # with the way average curves are calculated.  
+    precision_recall = {
+        'x': recall[::-1],
+        'y': precision[::-1],
+        'area': average_precision    
+    }
+
+    peak_curve = {
+        'x': peaks_with_j,
+        'y': js_with_peak,
+        'area': peak_auc   
+    }
+
+    return receiver_operator, precision_recall, peak_curve
+
+def sample(vectors, n_examples):
+    if len(vectors) <= n_examples:
+        return vectors
     else:
-        mean_x = np.mean(x, axis = 0)
-        mean_y = np.mean(y, axis = 0)
-        std_y = np.std(y, axis = 0)
+        index = np.arange(len(vectors))
+        selection = np.random.choice(index, n_examples, replace = False)
+        return vectors[selection]
 
-    mean_area = np.mean(area)
-    std_area = np.std(area)
+# We will define our model as a multi-layer densely connected neural network
+# with dropout between the layers.
+def create_model(input_dim):
+    model = keras.Sequential()
+    model.add(keras.layers.Dense(300, input_dim = input_dim, activation='relu'))
+    model.add(keras.layers.Dropout(0.5))
+    model.add(keras.layers.Dense(150, activation='relu'))
+    model.add(keras.layers.Dropout(0.5))
+    model.add(keras.layers.Dense(50, activation='relu'))
+    model.add(keras.layers.Dense(1, activation='sigmoid'))
+    model.compile(
+        optimizer='adam', 
+        loss='binary_crossentropy', 
+        metrics = ['accuracy'])
 
-    lower_y = mean_y - std_y
-    upper_y = mean_y + std_y
+    return model
+
+# TODO: Right now it trains on everything in the end. Maybe that's too much? 
+# Maybe it won't generalize? Tough to say, we should probably check using the 
+# cross validation step. 
+# TODO: Split to have equal classes?
+def train_final(vectors, dataframe, model, center = False, batch_size = 32):
+    # Extract examples and labels.
+    labels = dataframe['label'].to_numpy()
+
+    # Shuffle the order of examples.
+    index = np.random.permutation(len(vectors))
+    vectors = vectors[index]
+    labels = labels[index]
+
+    # Filter out non-centers if specified
+    if center:
+        condition = ((dataframe['top_A'] == 1) | (dataframe['top_T'] == 1))
+        vectors = vectors[condition]
+        dataframe = dataframe.loc[condition]
+
+    # Create tensorflow dataset and batch.
+    data = tf.data.Dataset.from_tensor_slices((vectors, labels))
+    data = data.batch(batch_size)
+
+    # Create progress bar.
+    length = int(np.ceil(len(vectors)/batch_size))
+    callback = progress_bars.train_progress(length)
+
+    model.fit(
+        data,
+        epochs = 10, 
+        verbose = 0, 
+        callbacks = [callback])
+
+def create_training_fold(vectors, labels, n_examples, batch_size = 32, train_all = False):
+    # Filter on labels.
+    positives = vectors[labels == 1]
+    negatives = vectors[labels == 0]
+
+    # Sample n examples.
+    n_examples = int(n_examples/2)
+    if not train_all: 
+        positives = sample(positives, n_examples)
+        negatives = sample(negatives, n_examples)
+
+    # Aggregate training examples and labels.
+    vectors = np.vstack([positives, negatives])
+    labels = np.hstack([np.ones(len(positives)), np.zeros(len(negatives))])
+
+    # Shuffle the order of examples.
+    length = len(vectors)
+    index = np.random.permutation(length)
+    vectors = vectors[index]
+    labels = labels[index]
+
+    # Convert to tensorflow dataset.
+    dataset = tf.data.Dataset.from_tensor_slices((vectors, labels))
+    dataset = dataset.batch(batch_size)
+
+    # Compute the number of batches.
+    length = int(np.ceil(length/batch_size))
+
+    return dataset, length
+
+def create_validation_fold(vectors, labels, batch_size = 32):
+    # Convert to tensorflow dataset.
+    dataset = tf.data.Dataset.from_tensor_slices((vectors, labels))
+    dataset = dataset.batch(batch_size)
+
+    # Compute the number of batches.
+    length = int(np.ceil(len(vectors)/batch_size))
+
+    return dataset, length
+
+# Begin training the neural network, with optional validation data, and model saving.
+def train_network(model, training_dataset, length, validation_split = 0.1):
+    # TODO: There doesn't seem to be a great way to get the length of a
+    # tf.DataSet, so instead we resort to passing the variable.
+    n_validation = int(length*validation_split)
+    validation_dataset = training_dataset.take(n_validation) 
+    training_dataset = training_dataset.skip(n_validation)
+
+    # Create out custom TQDM progress bar for training.
+    callback = progress_bars.train_progress(length)
+
+    history = model.fit(
+        training_dataset,
+        validation_data = validation_dataset,
+        epochs = 10, 
+        verbose = 0, 
+        callbacks = [callback])
+
+    epochs = range(1, len(history.history['accuracy']) + 1)
+    training_history = {'x': epochs, 'y': history.history['accuracy'], 'area': None}
+    validation_history = {'x': epochs, 'y': history.history['val_accuracy'], 'area': None}
     
-    return mean_x, mean_y, lower_y, upper_y, mean_area, std_area
+    return training_history, validation_history
 
-def plot(
-    filename,
-    training_history, 
-    validation_history, 
-    false_positive_rate, 
-    true_positive_rate, 
-    roc_auc, 
-    precision,
-    recall, 
-    average_precision,
-    peak_percent,
-    peaks_with_j,
-    js_in_peak,
-    peak_auc,
-    at_training_history, 
-    at_validation_history, 
-    at_false_positive_rate, 
-    at_true_positive_rate, 
-    at_roc_auc, 
-    at_precision,
-    at_recall, 
-    at_average_precision,
-    at_peak_percent,
-    at_peaks_with_j,
-    at_js_in_peak,
-    at_peak_auc,
-    simple_roc,
-    complex_roc,
-    name = 'Neural Network'):
+def validate_network(model, validation_dataset, length):
+    callback = progress_bars.predict_progress(length)
 
-    with PdfPages(filename) as pdf:
-        folds = len(training_history)
-        mean_training = np.mean(training_history, axis = 0)
-        mean_validation = np.mean(validation_history, axis = 0)
-        mean_at_training = np.mean(at_training_history, axis = 0)
-        mean_at_validation = np.mean(at_validation_history, axis = 0)
-        epochs = range(1, len(mean_training) + 1)
+    scores = model.predict(
+        validation_dataset,
+        callbacks = [callback])
 
-        std_training = np.std(training_history, axis = 0)
-        std_validation = np.std(validation_history, axis = 0)
-        std_at_training = np.std(at_training_history, axis = 0)
-        std_at_validation = np.std(at_validation_history, axis = 0)
+    return scores.reshape(-1)
 
-        # Training Plot
-        plt.figure(
-            figsize = (8, 4), 
-            dpi = 150, 
-            facecolor = 'white')
-        plt.plot(
-            epochs, 
-            mean_training, 
-            color = 'C0',
-            linewidth = 2,
-            label = f'All Training Accuracy (Final = {mean_training[-1]:.2f})')
-        plt.fill_between(
-            epochs, 
-            mean_training + std_training, 
-            mean_training - std_training, 
-            color = 'C0', 
-            alpha = 0.2)
-        plt.plot(
-            epochs, 
-            mean_validation, 
-            color = 'C1',  
-            linewidth = 2,
-            label = f'All Validation Accuracy (Final = {mean_validation[-1]:.2f})')
-        plt.fill_between(
-            epochs, 
-            mean_validation + std_training, 
-            mean_validation - std_training,
-            color = 'C1', 
-            alpha = 0.2)
-        plt.plot(
-            epochs, 
-            mean_at_training, 
-            color = 'C2',
-            linewidth = 2,
-            label = f'A/T Training Accuracy (Final = {mean_at_training[-1]:.2f})')
-        plt.fill_between(
-            epochs, 
-            mean_at_training + std_at_training, 
-            mean_at_training - std_at_training, 
-            color = 'C2', 
-            alpha = 0.2)
-        plt.plot(
-            epochs, 
-            mean_validation, 
-            color = 'C3',  
-            linewidth = 2,
-            label = f'A/T Validation Accuracy (Final = {mean_at_validation[-1]:.2f})')
-        plt.fill_between(
-            epochs, 
-            mean_at_validation + std_at_training, 
-            mean_at_validation - std_at_training,
-            color = 'C3', 
-            alpha = 0.2)
-        plt.legend(
-            bbox_to_anchor = (1.05, 1), 
-            loc = 'upper left')
-        plt.title(f'{folds} Fold Training with {name}')
-        plt.xlabel('Epoch')
-        plt.ylabel('Accuracy')
-        plt.ylim([-0.1,1.1])
-        plt.tight_layout()
-        pdf.savefig()
-        plt.close()
+def train_fold(model, vectors, dataframe, n_examples, train_all):
+    labels = dataframe['label'].to_numpy()
+    dataset, length = create_training_fold(
+        vectors = vectors,
+        labels = labels,
+        n_examples = n_examples,
+        train_all = train_all)
 
-        mean_x, mean_y, lower_y, upper_y, mean_area, std_area = interpolate_curve(false_positive_rate, true_positive_rate, roc_auc)
+    training_history, validation_history = train_network(model, dataset, length)
 
-        # ROC Curve
-        plt.figure(
-            figsize = (8, 4), 
-            dpi = 150, 
-            facecolor = 'white')
-        for i in range(len(false_positive_rate)):
-            plt.plot(
-                false_positive_rate[i], 
-                true_positive_rate[i], 
-                linewidth = 1, 
-                alpha = 0.3)
-        plt.fill_between(
-            mean_x, 
-            lower_y, 
-            upper_y, 
-            color = 'grey', 
-            alpha = 0.2, 
-            label = r'$\pm \sigma$')
-        plt.plot(
-            mean_x, 
-            mean_y, 
-            color = 'C0',
-            linewidth = 2,
-            label = fr'Mean ROC (AUC = {mean_area:.2f} $\pm$ {std_area:.2f})')
-        plt.plot(
-            [0, 1], 
-            [0, 1], 
-            linestyle = '--', 
-            color = 'black')
-        plt.legend(
-            bbox_to_anchor = (1.05, 1), 
-            loc = 'upper left')
-        plt.title(f'{folds} Fold ROC with {name} (All Bases)')
-        plt.xlabel('False Positive Rate')
-        plt.xlim([-0.1, 1.1])
-        plt.ylabel('True Positive Rate')
-        plt.ylim([-0.1,1.1])
-        plt.tight_layout()
-        pdf.savefig()
-        plt.close()
+    return training_history, validation_history
 
-        at_mean_x, at_mean_y, at_lower_y, at_upper_y, at_mean_area, at_std_area = interpolate_curve(at_false_positive_rate, at_true_positive_rate, at_roc_auc)
-        # ROC Curve
-        plt.figure(
-            figsize = (8, 4), 
-            dpi = 150, 
-            facecolor = 'white')
-        for i in range(len(at_false_positive_rate)):
-            plt.plot(
-                at_false_positive_rate[i], 
-                at_true_positive_rate[i], 
-                linewidth = 1, 
-                alpha = 0.3)
-        plt.fill_between(
-            at_mean_x, 
-            at_lower_y, 
-            at_upper_y, 
-            color = 'grey', 
-            alpha = 0.2, 
-            label = r'$\pm \sigma$')
-        plt.plot(
-            at_mean_x, 
-            at_mean_y, 
-            color = 'C0',
-            linewidth = 2,
-            label = fr'Mean ROC (AUC = {at_mean_area:.2f} $\pm$ {at_std_area:.2f})')
-        plt.plot(
-            [0, 1], 
-            [0, 1], 
-            linestyle = '--', 
-            color = 'black')
-        plt.legend(
-            bbox_to_anchor = (1.05, 1), 
-            loc = 'upper left')
-        plt.title(f'{folds} Fold ROC with {name} (A/T Bases)')
-        plt.xlabel('False Positive Rate')
-        plt.xlim([-0.1, 1.1])
-        plt.ylabel('True Positive Rate')
-        plt.ylim([-0.1,1.1])
-        plt.tight_layout()
-        pdf.savefig()
-        plt.close()
+def validate_fold(model, vectors, dataframe):
+    labels = dataframe['label'].to_numpy()
+    dataset, length = create_validation_fold(
+        vectors = vectors,
+        labels = labels)
 
-        mean_x, mean_y, lower_y, upper_y, mean_area, std_area = interpolate_curve(recall, precision, average_precision)
-        
-        # Precision Recall Curve
-        plt.figure(
-            figsize = (8, 4), 
-            dpi = 150, 
-            facecolor = 'white')
-        for i in range(len(recall)):
-            plt.plot(
-                recall[i], 
-                precision[i], 
-                linewidth = 1,
-                alpha = 0.3)
-        plt.fill_between(
-            mean_x, 
-            lower_y, 
-            upper_y, 
-            color = 'grey', 
-            alpha = 0.2, 
-            label = r'$\pm \sigma$')
-        plt.plot(
-            mean_x, 
-            mean_y, 
-            color = 'C0', 
-            linewidth = 2,
-            label = fr'Mean PR (AP = {mean_area:.2f} $\pm$ {std_area:.2f})')
-        plt.plot(
-            [0, 1], 
-            [peak_percent, peak_percent], 
-            linestyle = '--', 
-            color = 'black')
-        plt.legend(
-            bbox_to_anchor = (1.05, 1), 
-            loc = 'upper left')
-        plt.title(f'{folds} Fold PR with {name} (All Bases)')
-        plt.xlabel('Recall')
-        plt.xlim([-0.1, 1.1])
-        plt.ylabel('Precision')
-        plt.ylim([-0.1,1.1])
-        plt.tight_layout()
-        pdf.savefig()
-        plt.close()
+    scores = validate_network(model, dataset, length)
 
-        at_mean_x, at_mean_y, at_lower_y, at_upper_y, at_mean_area, at_std_area = interpolate_curve(at_recall, at_precision, at_average_precision)
-        
-        # Precision Recall Curve
-        plt.figure(
-            figsize = (8, 4), 
-            dpi = 150, 
-            facecolor = 'white')
-        for i in range(len(at_recall)):
-            plt.plot(
-                at_recall[i], 
-                at_precision[i], 
-                linewidth = 1,
-                alpha = 0.3)
-        plt.fill_between(
-            at_mean_x, 
-            at_lower_y, 
-            at_upper_y, 
-            color = 'grey', 
-            alpha = 0.2, 
-            label = r'$\pm \sigma$')
-        plt.plot(
-            at_mean_x, 
-            at_mean_y, 
-            color = 'C0', 
-            linewidth = 2,
-            label = fr'Mean PR (AP = {at_mean_area:.2f} $\pm$ {at_std_area:.2f})')
-        plt.plot(
-            [0, 1], 
-            [at_peak_percent, at_peak_percent], 
-            linestyle = '--', 
-            color = 'black')
-        plt.legend(
-            bbox_to_anchor = (1.05, 1), 
-            loc = 'upper left')
-        plt.title(f'{folds} Fold PR with {name} (A/T Bases)')
-        plt.xlabel('Recall')
-        plt.xlim([-0.1, 1.1])
-        plt.ylabel('Precision')
-        plt.ylim([-0.1,1.1])
-        plt.tight_layout()
-        pdf.savefig()
-        plt.close()
+    return  scores
 
+def train_dataset(vectors, dataframe, threshold, n_examples, holdout, window, min_peak_length, train_all):
+    # Drop rows where there are any nulls.
+    condition = vectors.any(axis = 1)
+    vectors = vectors[condition]
+    dataframe = dataframe.loc[condition]
 
-        mean_x, mean_y, lower_y, upper_y, mean_area, std_area = interpolate_curve(peaks_with_j, js_in_peak, peak_auc)
-        
-        # Peak J Curve
-        plt.figure(
-            figsize = (8, 4), 
-            dpi = 150, 
-            facecolor = 'white')
-        for i in range(len(peaks_with_j)):
-            plt.plot(
-                peaks_with_j[i], 
-                js_in_peak[i], 
-                linewidth = 1,
-                alpha = 0.3)
-        plt.fill_between(
-            mean_x, 
-            lower_y, 
-            upper_y, 
-            color = 'grey', 
-            alpha = 0.2, 
-            label = r'$\pm \sigma$')
-        plt.plot(
-            mean_x, 
-            mean_y, 
-            color = 'C0', 
-            linewidth = 2,
-            label = fr'Mean AUC = {mean_area:.2f} $\pm$ {std_area:.2f}')
-        plt.plot(
-            [0, 1], 
-            [peak_percent, peak_percent], 
-            linestyle = '--', 
-            color = 'black')
-        plt.legend(
-            bbox_to_anchor = (1.05, 1), 
-            loc = 'upper left')
-        plt.title(f'{folds} Fold Peak Recall with {name} (All Bases)')
-        plt.xlabel('% Peaks with J')
-        plt.xlim([-0.1, 1.1])
-        plt.ylabel('% Js in Peak')
-        plt.ylim([-0.1,1.1])
-        plt.tight_layout()
-        pdf.savefig()
-        plt.close()
+    # Add a label column based on fold change threshold.
+    label = (dataframe['fold_change'] >= threshold).astype(int)
+    dataframe = dataframe.assign(label = label)
 
-        at_mean_x, at_mean_y, at_lower_y, at_upper_y, at_mean_area, at_std_area = interpolate_curve(at_peaks_with_j, at_js_in_peak, at_peak_auc)
-        
-        # Peak J Curve
-        plt.figure(
-            figsize = (8, 4), 
-            dpi = 150, 
-            facecolor = 'white')
-        for i in range(len(at_peaks_with_j)):
-            plt.plot(
-                at_peaks_with_j[i], 
-                at_js_in_peak[i], 
-                linewidth = 1,
-                alpha = 0.3)
-        plt.fill_between(
-            at_mean_x, 
-            at_lower_y, 
-            at_upper_y, 
-            color = 'grey', 
-            alpha = 0.2, 
-            label = r'$\pm \sigma$')
-        plt.plot(
-            at_mean_x, 
-            at_mean_y, 
-            color = 'C0', 
-            linewidth = 2,
-            label = fr'Mean AUC = {at_mean_area:.2f} $\pm$ {at_std_area:.2f}')
-        plt.plot(
-            [0, 1], 
-            [at_peak_percent, at_peak_percent], 
-            linestyle = '--', 
-            color = 'black')
-        plt.legend(
-            bbox_to_anchor = (1.05, 1), 
-            loc = 'upper left')
-        plt.title(f'{folds} Fold Peak Recall with {name} (A/T Bases)')
-        plt.xlabel('% Peaks with J')
-        plt.xlim([-0.1, 1.1])
-        plt.ylabel('% Js in Peak')
-        plt.ylim([-0.1,1.1])
-        plt.tight_layout()
-        pdf.savefig()
-        plt.close()
+    # Add a peak column based on where ChIP peaks occur.
+    dataframe = label_peaks(dataframe, threshold, min_peak_length)
 
-        print(simple_roc)
-        mean_x, mean_y, lower_y, upper_y, mean_area, std_area = interpolate_curve([simple_roc[0]], [simple_roc[1]], [simple_roc[2]])
+    # Remove test holdout chromosome.
+    index = dataframe.index.get_level_values('chromosome')
+    chromosomes = dataframe.index.unique(level = 'chromosome').to_list()
+    if holdout:
+        chromosomes.remove(holdout)
+        condition = (index != holdout)
+        vectors = vectors[condition]
+        dataframe = dataframe.loc[condition]
 
-        # ROC Curve
-        plt.figure(
-            figsize = (8, 4), 
-            dpi = 150, 
-            facecolor = 'white')
-        plt.plot(
-            simple_roc[0], 
-            simple_roc[1], 
-            linewidth = 1, 
-            alpha = 0.3)
-        plt.fill_between(
-            mean_x, 
-            lower_y, 
-            upper_y, 
-            color = 'grey', 
-            alpha = 0.2, 
-            label = r'$\pm \sigma$')
-        plt.plot(
-            mean_x, 
-            mean_y, 
-            color = 'C0',
-            linewidth = 2,
-            label = fr'Mean ROC (AUC = {mean_area:.2f} $\pm$ {std_area:.2f})')
-        plt.plot(
-            [0, 1], 
-            [0, 1], 
-            linestyle = '--', 
-            color = 'black')
-        plt.legend(
-            bbox_to_anchor = (1.05, 1), 
-            loc = 'upper left')
-        plt.title(f'Simple ROC with {name}')
-        plt.xlabel('False Positive Rate')
-        plt.xlim([-0.1, 1.1])
-        plt.ylabel('True Positive Rate')
-        plt.ylim([-0.1,1.1])
-        plt.tight_layout()
-        pdf.savefig()
-        plt.close()
+    # Remove the Maxi_A chromosome.
+    if 'MaxiA' in chromosomes:
+        index = dataframe.index.get_level_values('chromosome')
+        chromosomes.remove('MaxiA')
+        condition = (index != 'MaxiA')
+        vectors = vectors[condition]
+        dataframe = dataframe.loc[condition]
 
-        mean_x, mean_y, lower_y, upper_y, mean_area, std_area = interpolate_curve([complex_roc[0]], [complex_roc[1]], [complex_roc[2]])
+    # Percent of rows which are in peaks.
+    peak_percent = dataframe['label'].sum()/len(dataframe)
 
-        # ROC Curve
-        plt.figure(
-            figsize = (8, 4), 
-            dpi = 150, 
-            facecolor = 'white')
-        plt.plot(
-            complex_roc[0], 
-            complex_roc[1], 
-            linewidth = 1, 
-            alpha = 0.3)
-        plt.fill_between(
-            mean_x, 
-            lower_y, 
-            upper_y, 
-            color = 'grey', 
-            alpha = 0.2, 
-            label = r'$\pm \sigma$')
-        plt.plot(
-            mean_x, 
-            mean_y, 
-            color = 'C0',
-            linewidth = 2,
-            label = fr'Mean ROC (AUC = {mean_area:.2f} $\pm$ {std_area:.2f})')
-        plt.plot(
-            [0, 1], 
-            [0, 1], 
-            linestyle = '--', 
-            color = 'black')
-        plt.legend(
-            bbox_to_anchor = (1.05, 1), 
-            loc = 'upper left')
-        plt.title(f'Complex ROC with {name}')
-        plt.xlabel('False Positive Rate')
-        plt.xlim([-0.1, 1.1])
-        plt.ylabel('True Positive Rate')
-        plt.ylim([-0.1,1.1])
-        plt.tight_layout()
-        pdf.savefig()
-        plt.close()
+    results = {
+        'history': [],
+        'receiver_operator': [],
+        'precision_recall': [],
+        'peak_curve': [],
+        'peak_baseline': peak_percent
+    }
+
+    model = create_model(window)
+    index = dataframe.index.get_level_values('chromosome')
+    for holdout in chromosomes:
+        # Training fold.
+        training_vectors = vectors[index != holdout]
+        training_dataframe = dataframe.loc[index != holdout]
+
+        # Validation fold.
+        validation_vectors = vectors[index == holdout]
+        validation_dataframe = dataframe.loc[index == holdout]
+
+        # Complex threshold baseline.
+        scores = complex_threshold(validation_dataframe)
+
+        # Store metrics.
+        roc, pr, peak = get_metrics(validation_dataframe, scores)
+        results['receiver_operator'].append(roc)
+        results['precision_recall'].append(pr)
+        results['peak_curve'].append(peak)
+
+        # Only keep the T's. 
+        condition = ((validation_dataframe['top_A'] == 1) | (validation_dataframe['top_T'] == 1))
+        validation_vectors = validation_vectors[condition]
+        validation_dataframe = validation_dataframe.loc[condition]
+
+        # Simple threshold baseline.
+        scores = simple_threshold(validation_dataframe)
+
+        # Store metrics.
+        roc, pr, peak = get_metrics(validation_dataframe, scores)
+        results['receiver_operator'].append(roc)
+        results['precision_recall'].append(pr)
+        results['peak_curve'].append(peak)
+
+        training_history, validation_history = train_fold(
+            model = model,
+            vectors = training_vectors,
+            dataframe = training_dataframe,
+            n_examples = n_examples,
+            train_all = train_all)
+
+        # Store history.
+        results['history'].append(training_history)
+        results['history'].append(validation_history)
+
+        scores = validate_fold(
+            model = model,
+            vectors = validation_vectors,
+            dataframe = validation_dataframe)
+        model.reset_states()
+
+        # Store metrics.
+        roc, pr, peak = get_metrics(validation_dataframe, scores)
+        results['receiver_operator'].append(roc)
+        results['precision_recall'].append(pr)
+        results['peak_curve'].append(peak)
+
+        # Only keep the T's. 
+        condition = ((training_dataframe['top_A'] == 1) | (training_dataframe['top_T'] == 1))
+        training_vectors = training_vectors[condition]
+        training_dataframe = training_dataframe.loc[condition]
+
+        training_history, validation_history = train_fold(
+            model = model,
+            vectors = training_vectors,
+            dataframe = training_dataframe,
+            n_examples = n_examples,
+            train_all = train_all)
+
+        # Store history.
+        results['history'].append(training_history)
+        results['history'].append(validation_history)
+
+        scores = validate_fold(
+            model = model,
+            vectors = validation_vectors,
+            dataframe = validation_dataframe)
+        model.reset_states()
+
+        # Store metrics.
+        roc, pr, peak = get_metrics(validation_dataframe, scores)
+        results['receiver_operator'].append(roc)
+        results['precision_recall'].append(pr)
+        results['peak_curve'].append(peak)
+
+    return results
+
+def order_results(results):
+    reorder = {
+        'history': [],
+        'receiver_operator': [],
+        'precision_recall': [],
+        'peak_curve': [],
+    }
+
+    total_curves = {
+        'history': 4,
+        'receiver_operator': 4,
+        'precision_recall': 4,
+        'peak_curve': 4
+    }
+
+    for item in reorder:
+        curve = {
+            'x': [],
+            'y': [],
+            'area': [],
+            'label': None,
+        }
+
+        for i in range(total_curves[item]):
+            reorder[item].append(copy.deepcopy(curve))
+
+    history_labels = [
+        'All Bases (Training)',
+        'All Bases (Validation)',
+        'Only T (Training)',
+        'Only T (Validation)']
+
+    other_labels = [
+        'Complex Threshold',
+        'Simple Threshold',
+        'All Bases',
+        'Only T'
+    ]
+
+    for i in range(len(history_labels)):
+        reorder['history'][i]['label'] = history_labels[i]
+
+    for metric in ['receiver_operator', 'precision_recall', 'peak_curve']:
+        for i in range(len(other_labels)):
+            reorder[metric][i]['label'] = other_labels[i]
+
+    for metric in reorder:
+        current_result = results[metric]
+        current_metric = reorder[metric]
+
+        curves = total_curves[metric]
+        folds = int(len(current_result)/curves)
+
+        n = 0
+        for i in range(folds):
+            for j in range(curves):
+                current_fold = current_result[n]
+                for item in current_fold:
+                    current_metric[j][item].append(current_fold[item])
+                n += 1
+
+    reorder['peak_baseline'] = results['peak_baseline']
+    return reorder
 
 def main():
     # Get argparse arguments. 
@@ -983,14 +633,10 @@ def main():
     window = len(metadata['columns'])
     utils.end_time(start) 
 
-    print("Computing thresholding baselines")
-    simple_roc = simple_threshold(dataframe["top_ipd"], dataframe["bottom_ipd"], dataframe['fold_change'] >= arguments.fold_change)
-    complex_roc = complex_threshold(dataframe["top_ipd"], dataframe["bottom_ipd"], dataframe['fold_change'] >= arguments.fold_change)
-
     # Training model.
-    print("Training model (all bases)")
+    print("Training Model")
     start = utils.start_time()
-    all_vectors, all_dataframe, all_model, all_results = train_dataset(
+    results = train_dataset(
         vectors = vectors,
         dataframe = dataframe,
         threshold = arguments.fold_change,
@@ -998,28 +644,10 @@ def main():
         holdout = arguments.holdout, 
         window = window,
         min_peak_length = arguments.min_peak_length,
-        center = False,
         train_all = arguments.train_all)
     utils.end_time(start) 
 
-    print("Training model (only As and Ts)")
-    start = utils.start_time()
-    at_vectors, at_dataframe, at_model, at_results = train_dataset(
-        vectors = vectors,
-        dataframe = dataframe,
-        threshold = arguments.fold_change,
-        n_examples = arguments.n_examples,
-        holdout = arguments.holdout, 
-        window = window,
-        min_peak_length = arguments.min_peak_length,
-        center = True,
-        train_all = arguments.train_all)
-    utils.end_time(start) 
-
-    results = all_results.copy()
-    results.update({"at_" + r: at_results[r] for r in at_results})
-    results["simple_roc"] = simple_roc
-    results["complex_roc"] = complex_roc
+    results = order_results(results)
 
     # Plotting performance. 
     print ('Plotting Performance')
@@ -1030,7 +658,7 @@ def main():
         filename = os.path.join(reports_folder, f'{arguments.prefix}_model_performance.pdf')
     else:
         filename = os.path.join(reports_folder, 'model_performance.pdf')
-    plot(filename, **results)
+    plot_metrics.plot_pdf(results, filename)
 
     if not arguments.skip_final:
         start = utils.start_time('Training Final Model')
