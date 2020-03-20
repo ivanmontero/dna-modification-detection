@@ -1,27 +1,26 @@
 from matplotlib import pyplot as plt
 from tensorflow import keras
-from matplotlib.backends.backend_pdf import PdfPages
-
-import os
-import sys
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'utils'))
-
-import utils
-
+import tensorflow as tf
+import pandas as pd
 import numpy as np
 import argparse
-import json
-import time
-import tqdm
-import pandas as pd
 
-PEAKS_TO_VISUALIZE = 10
-WINDOW_AROUND_PEAK = 250
+# Import local helper functions.
+import os
+import sys
+current_path = os.path.dirname(__file__)
+utils_path = os.path.join(current_path, '..', 'utils')
+sys.path.append(utils_path)
+import utils
+
+# Import local.
+import progress_bars
 
 # Return argparse arguments. 
 def setup():
     parser = argparse.ArgumentParser(
-        description = 'Train a model on the features and save it.')
+        description = 'Make predictions for Base J locations.',
+        formatter_class = argparse.RawTextHelpFormatter)
 
     parser.version = 0.1
 
@@ -29,20 +28,39 @@ def setup():
         '-i', 
         '--input', 
         required = True,
-        help = 'Input extracted feature vectors json file to predict on.')
+        help = 'Input numpy array of feature vectors.')
 
     parser.add_argument(
-        '-m', 
-        '--metadata',
+        '-d', 
+        '--dataframe', 
         required = True,
-        help = 'Metadata for input table.')
+        help = 'Input pandas dataframe.')
     
     parser.add_argument(
-        '-mf',
-        '--model_file',
+        '-m',
+        '--model',
         required = True,
-        help = 'The file containing the model'
-    )
+        help = 'The file containing the model.')
+
+    parser.add_argument(
+        '-c',
+        '--chromosome',
+        required = True,
+        help = 'Which chromosome to visualize.')
+
+    parser.add_argument(
+        '-s',
+        '--start',
+        type = int,
+        required = True,
+        help = 'Start coordinate.')
+
+    parser.add_argument(
+        '-e',
+        '--end',
+        type = int,
+        required = True,
+        help = 'End coordinate.')
 
     parser.add_argument(
         '-p', 
@@ -50,126 +68,128 @@ def setup():
         default = False,
         help = 'Output prefix.')
 
+    # Turn progress bars off. 
     parser.add_argument(
-        '-c',
-        '--center',
-        default=False,
-        action='store_true',
-        help = 'Whether to only predict on the centers'
-    )
+        '--progress-off',
+        default = False,
+        action = 'store_true',
+        help = argparse.SUPPRESS)
 
     return parser.parse_args()
 
-def predict(model, vectors, data):
-    data["prediction"] = model.predict(vectors, verbose=1)
+def predict(model, vectors, progress_off, batch_size = 32):
+    # Convert to tensorflow dataset.
+    dataset = tf.data.Dataset.from_tensor_slices(vectors)
+    dataset = dataset.batch(batch_size)
 
-# Determines the most important bases in determining the model's confidence in the
-# window classification. Goes to each base in the window, and runs the classifier
-# with each changed to a different base. Returns the additive probability drop on
-# each base.
-def feature_importance(model, vectors, data, metadata):
-    arguments = metadata["arguments"]
-    window_size = arguments["window"]
-    columns = arguments["columns"]
-    predictions = data["prediction"]
-    center = window_size//2
-    n = vectors.shape[0]
+    # Compute the number of batches.
+    length = int(np.ceil(len(vectors)/batch_size))
 
-    start_indexing = [columns.index('top_A'), columns.index('top_T'), columns.index('top_C'), columns.index('top_G')]
-    center_indexing = [i + center for i in start_indexing]
-
-    rolled = np.zeros((n*3, vectors.shape[1]))
-    current = vectors.copy()
-    to_rotate = current[:,center_indexing]
-    for j in range(0, 3):
-        current[:,center_indexing] = np.roll(to_rotate, j+1, axis=1)
-        rolled[j*n:(j+1)*n,:] = current.copy()
-
-    roll_pred = model.predict(rolled, verbose=1)
+    # Create our custom TQDM progress bar for validation.
+    if progress_off:
+        callback = progress_bars.no_progress()
+    else:
+        callback = progress_bars.predict_progress(length)
     
-    drops = predictions - np.min(
-                np.concatenate(
-                    (roll_pred[:n], roll_pred[n:2*n], roll_pred[2*n:]), axis=-1), axis=-1)
-        
-    drops[drops < 0] = 0
-    data["drop"] = drops
+    scores = model.predict(
+        dataset,
+        callbacks = [callback])
+
+    return scores.reshape(-1)
+
+def plot(dataframe, filename):
+
+    dataframe.fillna(0, inplace = True)
+
+    if 'fold_change' in dataframe.columns:
+        num_plots = 3
+        index = 1
+
+        fold_change = dataframe['fold_change'].to_numpy()
+        plt.figure(figsize = (8,9), dpi = 100)
+        plt.subplot(num_plots, 1, 1)
+        plt.plot(fold_change)
+        plt.ylim([0, np.max(fold_change) * 1.1])
+        plt.ylabel('Fold Change')
+        plt.title('Fold Change')
+    else:
+        num_plots = 2
+        index = 0
+        plt.figure(figsize = (8,6), dpi = 100)
+
+    top_ipd = dataframe['top_ipd'].to_numpy()
+    bottom_ipd = dataframe['bottom_ipd'].to_numpy()
+
+    min_top = np.min(top_ipd)
+    min_bottom = np.min(bottom_ipd)
+
+    # Renormalize the IPD data so there are no negative numbers. 
+    top_ipd = top_ipd - min_top
+    bottom_ipd = -bottom_ipd + min_bottom
+    position =  np.arange(len(top_ipd))
+
+    index += 1
+    plt.subplot(num_plots, 1, index)
+    plt.bar(position, top_ipd)
+    plt.bar(position, bottom_ipd)
+    plt.ylabel('IPD')
+    plt.title('IPD Ratios')
+
+    scores = dataframe['score'].to_numpy()
+    position = np.arange(len(scores))
+
+    index += 1
+    plt.subplot(num_plots, 1, index)
+    plt.bar(position, scores)
+    plt.ylim([0,1])
+    plt.xlabel('Position')
+    plt.ylabel('Probability')
+    plt.title('Predictions')
+    plt.tight_layout()
+    plt.savefig(filename)
 
 def main():
+    # Get argparse arguments. 
+    arguments = setup()
+
+    total_start = utils.start_time()
     # Get rid of random tensorflow warnings.
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
-    arguments = setup()
-    print ('Reading Data')
-    data = pd.read_pickle(arguments.input)
-    with open(arguments.metadata) as infile:
-        metadata = json.load(infile)
+    # Reading data. 
+    start = utils.start_time('Reading Data')
+    dataframe = pd.read_hdf(arguments.dataframe)
+    vectors = np.load(arguments.input)
+    utils.end_time(start) 
 
-    data = data.dropna()
-    vectors = np.array(list(data['vectors'].to_numpy()))
-    model = keras.models.load_model(arguments.model_file)
-    window = len(metadata['columns'])
+    # Only use requested section.
+    index = dataframe.index.get_level_values('chromosome')
+    position = dataframe.index.get_level_values('position')
 
-    print ('Making Predictions')
-    predict(model, vectors, data)
+    condition = ((index == arguments.chromosome) & (position > arguments.start) & (position < arguments.end))
+    vectors = vectors[condition]
+    dataframe = dataframe[condition]
 
-    print ('Running Feature Importance')
-    feature_importance(model, vectors, data, metadata)
+    # Only predict on Ts. 
+    condition = ((dataframe['top_A'] == 1) | (dataframe['top_T'] == 1))
+    vectors = vectors[condition]
+
+    model = keras.models.load_model(arguments.model)
+    scores = predict(
+        model = model, 
+        vectors = vectors,
+        progress_off = arguments.progress_off)
+    dataframe.loc[condition, 'score'] = scores
 
     project_folder = utils.project_path()
-    data_folder = os.path.join(project_folder, 'data')
-    processed_folder = os.path.join(data_folder, 'processed')
     reports_folder = os.path.join(project_folder, 'reports')
+    predict_folder = os.path.join(reports_folder, 'predict')
     if arguments.prefix:
-        reports_filename = os.path.join(reports_folder, f'{arguments.prefix}_feature_importance.pdf')
-        predictions_filename = os.path.join(processed_folder, f'{arguments.prefix}_predictions.csv')
+        filename = os.path.join(predict_folder, f'{arguments.prefix}_predict.png')
     else:
-        reports_filename = os.path.join(reports_folder, 'feature_importance.pdf')
-        predictions_filename = os.path.join(processed_folder, 'predictions.csv')
+        filename = os.path.join(predict_folder, 'predict.png')
+    plot(dataframe, filename)
 
-    print ('Saving Feature Importance Values')
-    data['drop'].to_csv(predictions_filename)
-
-    print ('Saving Feature Importance Plots')
-    with PdfPages(reports_filename) as pdf: 
-        # plot_region(pdf, data, "25L_PLASMID_corrected", 4212, 4270)
-        for c in set(data.index.get_level_values('chromosome')):
-            c_data = data.loc[c]
-            largest_rows = c_data.nlargest(PEAKS_TO_VISUALIZE, 'drop')
-            for index, row in largest_rows.iterrows():
-                iloc = c_data.index.get_loc(row.name)
-                window = c_data.iloc[iloc - WINDOW_AROUND_PEAK: iloc + WINDOW_AROUND_PEAK + 1]
-                plot_window(pdf, window)
-
-def plot_region(pdf, data, chromosome, start_position, end_position):
-    window = data.loc[chromosome, start_position:end_position, :]
-    plot_window(pdf, window)
-
-def plot_window(pdf, window):
-    plot_row_num = 3 if "fold_change" in window.columns else 2
-    c_pos = window.index.get_level_values('position')
-    # TODO: Show the actual IPD values
-    plt.subplot(plot_row_num, 1, 1)
-    min_top, min_bottom = window["top_ipd"].min(), window["bottom_ipd"].min()
-    plt.plot(c_pos, window["top_ipd"] - min_top, label="top_ipd", linewidth=1)
-    plt.plot(c_pos, -window["bottom_ipd"] + min_bottom, label="bottom_ipd", linewidth=1)
-    plt.legend(
-        bbox_to_anchor = (1.05, 1), 
-        loc = 'upper left')
-    plt.subplot(plot_row_num, 1, 2)
-    plt.plot(c_pos, window["prediction"], label="prediction", linewidth=1)
-    plt.plot(c_pos, window["drop"], label="drop", linewidth=1)
-    plt.legend(
-        bbox_to_anchor = (1.05, 1), 
-        loc = 'upper left')
-    plt.tight_layout()
-    if "fold_change" in window.columns:
-        plt.subplot(plot_row_num, 1, 3)
-        plt.plot(c_pos, window["fold_change"], label="fold_change", linewidth=1)
-        plt.legend(
-            bbox_to_anchor = (1.05, 1), 
-            loc = 'upper left')
-    pdf.savefig()
-    plt.close()
 
 if __name__ == '__main__':
     main()

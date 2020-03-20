@@ -57,3 +57,7 @@ class predict_progress(keras.callbacks.Callback):
     def on_predict_end(self, logs):
         self.progress.close()
 
+# Callback for prediction progress. 
+class no_progress(keras.callbacks.Callback):
+    def __init__(self):
+        pass

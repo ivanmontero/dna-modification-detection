@@ -111,17 +111,17 @@ def plot_page(figure, ax, values, title, x_label, y_label, paired_colors = False
 
 # Plot the folds and average values.
 def plot_curve(ax, x_values, y_values, area, color, label):
-    # Plot Individual Folds.
-    for i in range(len(x_values)):
-        x = x_values[i]
-        y = y_values[i]
+    # # Plot Individual Folds.
+    # for i in range(len(x_values)):
+    #     x = x_values[i]
+    #     y = y_values[i]
 
-        ax.plot(
-            x, 
-            y, 
-            linewidth = 1,
-            color = color, 
-            alpha = 0.3)
+    #     ax.plot(
+    #         x, 
+    #         y, 
+    #         linewidth = 1,
+    #         color = color, 
+    #         alpha = 0.3)
 
     # Calculate the Means and Standard Deviations
     if not area: 
@@ -146,6 +146,9 @@ def plot_curve(ax, x_values, y_values, area, color, label):
         upper_y, 
         color = color, 
         alpha = 0.2)
+
+    # Fix the y axis between 0 and 1. 
+    ax.set_ylim([0,1])
 
 # Return a boilerplate figure.
 def create_plot():

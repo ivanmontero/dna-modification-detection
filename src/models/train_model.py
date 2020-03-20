@@ -56,7 +56,7 @@ def setup():
 
     parser.add_argument(
         '-d', 
-        '--data-frame', 
+        '--dataframe', 
         required = True,
         help = 'Input pandas dataframe.')
 
@@ -94,7 +94,7 @@ def setup():
 
     # Whether the final model is trained on only As and Ts
     parser.add_argument(
-        '--center',
+        '--only_t',
         default = False,
         action = 'store_true',
         help = argparse.SUPPRESS)
@@ -113,11 +113,18 @@ def setup():
         action = 'store_true',
         help = argparse.SUPPRESS)
 
-    # Turn the progress bars off.
+    # Minimum valid ChIP peak size. 
     parser.add_argument(
         '--min-peak-length',
         default = 20,
         type = int,
+        help = argparse.SUPPRESS)
+
+    # Turn progress bars off. 
+    parser.add_argument(
+        '--progress-off',
+        default = False,
+        action = 'store_true',
         help = argparse.SUPPRESS)
 
     return parser.parse_args()
@@ -220,7 +227,7 @@ def complex_threshold(dataframe):
 
     top_sum = top_zero + top_two + top_six
     bottom_sum = bottom_zero + bottom_two + bottom_six
-    minimum = np.amin(top_sum)
+    minimum = np.min(top_sum)
     scores = np.full(len(dataframe), minimum)
 
     scores[6:-6] = np.maximum(top_sum[:-6], bottom_sum[6:])
@@ -293,40 +300,91 @@ def create_model(input_dim):
 
     return model
 
-# TODO: Right now it trains on everything in the end. Maybe that's too much? 
-# Maybe it won't generalize? Tough to say, we should probably check using the 
-# cross validation step. 
-# TODO: Split to have equal classes?
-def train_final(vectors, dataframe, model, center = False, batch_size = 32):
-    # Extract examples and labels.
+# Determines the most important bases in determining the model's confidence in the
+# window classification. Goes to each base in the window, and runs the classifier
+# with each changed to a different base. Returns the additive probability drop on
+# each base.
+def feature_importance(model, vectors, scores, metadata, progress_off, batch_size = 32):
+    arguments = metadata["arguments"]
+    window_size = arguments["window"]
+    columns = arguments["columns"]
+    center = window_size // 2
+    length = len(vectors)
+
+    # Find out where each base starts in the vector.
+    start_indexing = [
+        columns.index('top_A'),
+        columns.index('top_T'),
+        columns.index('top_C'),
+        columns.index('top_G')]
+
+    # Determine where center base is. 
+    center_indexing = np.array(start_indexing) + center
+
+    # Empty array with 3 times as many rows. 
+    alternate_vectors = np.zeros((len(vectors) * 3, vectors.shape[1]))
+
+    # Only change the center base of the vectors.
+    current = vectors.copy()
+    to_rotate = current[:,center_indexing]
+
+    # Create vectors with all three other bases in the center.
+    for i in range(3):
+        current[:,center_indexing] = np.roll(to_rotate, i+1, axis = 1)
+        alternate_vectors[i*length:(i+1)*length,:] = current.copy()
+
+    # Convert to tensorflow dataset.
+    dataset = tf.data.Dataset.from_tensor_slices(alternate_vectors)
+    dataset = dataset.batch(batch_size)
+
+    # Compute the number of batches.
+    length = int(np.ceil(len(alternate_vectors)/batch_size))
+
+    new_predictions = validate_network(
+        model = model, 
+        dataset = dataset,
+        length = length, 
+        progress_off = progress_off)
+
+    # Get the aggregate new prediction and find the delta. 
+    new_predictions = new_predictions.reshape(3,-1)
+    drops = scores - np.min(new_predictions, axis = 0)
+
+    return drops
+
+def train_final(vectors, dataframe, n_examples, metadata, only_t, train_all, progress_off):
     labels = dataframe['label'].to_numpy()
 
-    # Shuffle the order of examples.
-    index = np.random.permutation(len(vectors))
-    vectors = vectors[index]
-    labels = labels[index]
-
-    # Filter out non-centers if specified
-    if center:
+    # Only keep Ts.
+    if only_t:
         condition = ((dataframe['top_A'] == 1) | (dataframe['top_T'] == 1))
         vectors = vectors[condition]
-        dataframe = dataframe.loc[condition]
+        labels = labels[condition]
 
-    # Create tensorflow dataset and batch.
-    data = tf.data.Dataset.from_tensor_slices((vectors, labels))
-    data = data.batch(batch_size)
+    # Create the dataset. 
+    dataset, length = create_training_fold(
+        vectors = vectors,
+        labels = labels,
+        n_examples = n_examples,
+        train_all = train_all)
 
-    # Create progress bar.
-    length = int(np.ceil(len(vectors)/batch_size))
-    callback = progress_bars.train_progress(length)
+    # Create out custom TQDM progress bar for training.
+    if progress_off:
+        callback = progress_bars.no_progress()
+    else:
+        callback = progress_bars.train_progress(length)
 
-    model.fit(
-        data,
-        epochs = 10, 
-        verbose = 0, 
+    window = len(metadata['columns'])
+    model = create_model(window)
+    history = model.fit(
+        dataset,
+        epochs = 10,
+        verbose = 0,
         callbacks = [callback])
 
-def create_training_fold(vectors, labels, n_examples, batch_size = 32, train_all = False):
+    return model
+
+def create_training_fold(vectors, labels, n_examples, train_all = False, batch_size = 32):
     # Filter on labels.
     positives = vectors[labels == 1]
     negatives = vectors[labels == 0]
@@ -367,21 +425,25 @@ def create_validation_fold(vectors, labels, batch_size = 32):
     return dataset, length
 
 # Begin training the neural network, with optional validation data, and model saving.
-def train_network(model, training_dataset, length, validation_split = 0.1):
+def train_network(model, training_dataset, length, progress_off, validation_split = 0.1):
     # TODO: There doesn't seem to be a great way to get the length of a
     # tf.DataSet, so instead we resort to passing the variable.
     n_validation = int(length*validation_split)
+    # Save 10% of the training to see how validation history looks.
     validation_dataset = training_dataset.take(n_validation) 
     training_dataset = training_dataset.skip(n_validation)
 
     # Create out custom TQDM progress bar for training.
-    callback = progress_bars.train_progress(length)
+    if progress_off:
+        callback = progress_bars.no_progress()
+    else:
+        callback = progress_bars.train_progress(length)
 
     history = model.fit(
         training_dataset,
         validation_data = validation_dataset,
-        epochs = 10, 
-        verbose = 0, 
+        epochs = 10,
+        verbose = 0,
         callbacks = [callback])
 
     epochs = range(1, len(history.history['accuracy']) + 1)
@@ -390,16 +452,20 @@ def train_network(model, training_dataset, length, validation_split = 0.1):
     
     return training_history, validation_history
 
-def validate_network(model, validation_dataset, length):
-    callback = progress_bars.predict_progress(length)
-
+def validate_network(model, dataset, length, progress_off):
+    # Create our custom TQDM progress bar for validation.
+    if progress_off:
+        callback = progress_bars.no_progress()
+    else:
+        callback = progress_bars.predict_progress(length)
+    
     scores = model.predict(
-        validation_dataset,
+        dataset,
         callbacks = [callback])
 
     return scores.reshape(-1)
 
-def train_fold(model, vectors, dataframe, n_examples, train_all):
+def train_fold(model, vectors, dataframe, n_examples, train_all, progress_off):
     labels = dataframe['label'].to_numpy()
     dataset, length = create_training_fold(
         vectors = vectors,
@@ -407,21 +473,21 @@ def train_fold(model, vectors, dataframe, n_examples, train_all):
         n_examples = n_examples,
         train_all = train_all)
 
-    training_history, validation_history = train_network(model, dataset, length)
+    training_history, validation_history = train_network(model, dataset, length, progress_off)
 
     return training_history, validation_history
 
-def validate_fold(model, vectors, dataframe):
+def validate_fold(model, vectors, dataframe, progress_off):
     labels = dataframe['label'].to_numpy()
     dataset, length = create_validation_fold(
         vectors = vectors,
         labels = labels)
 
-    scores = validate_network(model, dataset, length)
+    scores = validate_network(model, dataset, length, progress_off)
 
     return  scores
 
-def train_dataset(vectors, dataframe, threshold, n_examples, holdout, window, min_peak_length, train_all):
+def train_dataset(vectors, dataframe, threshold, n_examples, holdout, metadata, min_peak_length, train_all, progress_off):
     # Drop rows where there are any nulls.
     condition = vectors.any(axis = 1)
     vectors = vectors[condition]
@@ -462,6 +528,7 @@ def train_dataset(vectors, dataframe, threshold, n_examples, holdout, window, mi
         'peak_baseline': peak_percent
     }
 
+    window = len(metadata['columns'])
     model = create_model(window)
     index = dataframe.index.get_level_values('chromosome')
     for holdout in chromosomes:
@@ -501,7 +568,8 @@ def train_dataset(vectors, dataframe, threshold, n_examples, holdout, window, mi
             vectors = training_vectors,
             dataframe = training_dataframe,
             n_examples = n_examples,
-            train_all = train_all)
+            train_all = train_all,
+            progress_off = progress_off)
 
         # Store history.
         results['history'].append(training_history)
@@ -510,8 +578,23 @@ def train_dataset(vectors, dataframe, threshold, n_examples, holdout, window, mi
         scores = validate_fold(
             model = model,
             vectors = validation_vectors,
-            dataframe = validation_dataframe)
+            dataframe = validation_dataframe,
+            progress_off = progress_off)
         model.reset_states()
+
+        # Store metrics.
+        roc, pr, peak = get_metrics(validation_dataframe, scores)
+        results['receiver_operator'].append(roc)
+        results['precision_recall'].append(pr)
+        results['peak_curve'].append(peak)
+
+        # Delta T baseline.
+        scores = feature_importance(
+            model = model,
+            vectors = validation_vectors,
+            scores = scores,
+            metadata = metadata,
+            progress_off = progress_off)
 
         # Store metrics.
         roc, pr, peak = get_metrics(validation_dataframe, scores)
@@ -529,7 +612,8 @@ def train_dataset(vectors, dataframe, threshold, n_examples, holdout, window, mi
             vectors = training_vectors,
             dataframe = training_dataframe,
             n_examples = n_examples,
-            train_all = train_all)
+            train_all = train_all,
+            progress_off = progress_off)
 
         # Store history.
         results['history'].append(training_history)
@@ -538,7 +622,8 @@ def train_dataset(vectors, dataframe, threshold, n_examples, holdout, window, mi
         scores = validate_fold(
             model = model,
             vectors = validation_vectors,
-            dataframe = validation_dataframe)
+            dataframe = validation_dataframe,
+            progress_off = progress_off)
         model.reset_states()
 
         # Store metrics.
@@ -547,7 +632,7 @@ def train_dataset(vectors, dataframe, threshold, n_examples, holdout, window, mi
         results['precision_recall'].append(pr)
         results['peak_curve'].append(peak)
 
-    return results
+    return vectors, dataframe, results
 
 def order_results(results):
     reorder = {
@@ -557,13 +642,31 @@ def order_results(results):
         'peak_curve': [],
     }
 
+    # Labels for things needing training.
+    history_labels = [
+        'All Bases (Training)',
+        'All Bases (Validation)',
+        'Only T (Training)',
+        'Only T (Validation)']
+
+    # Labels for everything evaluated.
+    other_labels = [
+        'Complex Threshold',
+        'Simple Threshold',
+        'All Bases',
+        'Delta T',
+        'Only T'
+    ]
+
+    # The number of curves for each metric.
     total_curves = {
-        'history': 4,
-        'receiver_operator': 4,
-        'precision_recall': 4,
-        'peak_curve': 4
+        'history': len(history_labels),
+        'receiver_operator': len(other_labels),
+        'precision_recall': len(other_labels),
+        'peak_curve': len(other_labels)
     }
 
+    # Add the expected structure for each curve.
     for item in reorder:
         curve = {
             'x': [],
@@ -575,26 +678,16 @@ def order_results(results):
         for i in range(total_curves[item]):
             reorder[item].append(copy.deepcopy(curve))
 
-    history_labels = [
-        'All Bases (Training)',
-        'All Bases (Validation)',
-        'Only T (Training)',
-        'Only T (Validation)']
-
-    other_labels = [
-        'Complex Threshold',
-        'Simple Threshold',
-        'All Bases',
-        'Only T'
-    ]
-
+    # Add the labels for the history metric.
     for i in range(len(history_labels)):
         reorder['history'][i]['label'] = history_labels[i]
 
+    # Add the labels for everything else.
     for metric in ['receiver_operator', 'precision_recall', 'peak_curve']:
         for i in range(len(other_labels)):
             reorder[metric][i]['label'] = other_labels[i]
 
+    # Reorder the results so folds are sequential instead of metrics.
     for metric in reorder:
         current_result = results[metric]
         current_metric = reorder[metric]
@@ -626,25 +719,25 @@ def main():
 
     # Reading data. 
     start = utils.start_time('Reading Data')
-    dataframe = pd.read_hdf(arguments.data_frame)
+    dataframe = pd.read_hdf(arguments.dataframe)
     vectors = np.load(arguments.input)
     with open(arguments.metadata) as infile:
         metadata = json.load(infile)
-    window = len(metadata['columns'])
     utils.end_time(start) 
 
     # Training model.
     print("Training Model")
     start = utils.start_time()
-    results = train_dataset(
+    vectors, dataframe, results = train_dataset(
         vectors = vectors,
         dataframe = dataframe,
         threshold = arguments.fold_change,
         n_examples = arguments.n_examples,
         holdout = arguments.holdout, 
-        window = window,
+        metadata = metadata,
         min_peak_length = arguments.min_peak_length,
-        train_all = arguments.train_all)
+        train_all = arguments.train_all,
+        progress_off = arguments.progress_off)
     utils.end_time(start) 
 
     results = order_results(results)
@@ -667,7 +760,16 @@ def main():
             filename = os.path.join(models_folder, f'{arguments.prefix}_model.h5')
         else:
             filename = os.path.join(models_folder, 'model.h5')
-        train_final(vectors, dataframe, model, arguments.center)
+
+        model = train_final(
+            vectors = vectors, 
+            dataframe = dataframe, 
+            n_examples = arguments.n_examples, 
+            metadata = metadata, 
+            only_t = arguments.only_t,
+            train_all = arguments.train_all,
+            progress_off = arguments.progress_off)
+
         model.save(filename)
         utils.end_time(start)
 
