@@ -27,4 +27,4 @@ models/
 `python src/features/extraction.py -i data/interm/plasmid_1_data.h5 -p plasmid_1`
 
 6) Create predictions on the plamid data using the trained network. 
-`python src/models/predict_model.py -i data/processed/plasmid_1_data.npy -d data/interm/plasmid_1_data.h5 -m models/test_model.h5 -c 25L_PLASMID_corrected -s 4212 -e 4270`
+`python src/models/predict_model.py -i data/processed/plasmid_1_data.npy -d data/interm/plasmid_1_data.h5 -m models/test_model.h5 -c 25L_PLASMID_corrected -s 4212 -e 4270 -p test`
