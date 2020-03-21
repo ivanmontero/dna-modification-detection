@@ -9,11 +9,12 @@ def import_modules():
     global plot_metrics
     global metrics
     global utils
-    global keras
     global copy 
     global json
     global sys
-    global tf
+    global torch
+    global nn
+    global F
     global pd
     global np
     global os
@@ -32,9 +33,10 @@ def import_modules():
     import plot_metrics
 
     # Import Everything Else
-    from tensorflow import keras
     from sklearn import metrics
-    import tensorflow as tf
+    import torch
+    import torch.nn as nn
+    import torch.nn.functional as F
     import pandas as pd
     import numpy as np
     import json
@@ -299,20 +301,27 @@ def sample(vectors, n_examples):
 # We will define our model as a multi-layer densely connected neural network
 # with dropout between the layers.
 # TODO: Parameterize this
-def create_model(input_dim):
-    model = keras.Sequential()
-    model.add(keras.layers.Dense(300, input_dim = input_dim, activation='relu'))
-    model.add(keras.layers.Dropout(0.5))
-    model.add(keras.layers.Dense(150, activation='relu'))
-    model.add(keras.layers.Dropout(0.5))
-    model.add(keras.layers.Dense(50, activation='relu'))
-    model.add(keras.layers.Dense(1, activation='sigmoid'))
-    model.compile(
-        optimizer='adam', 
-        loss='binary_crossentropy', 
-        metrics = ['accuracy'])
+def create_model(input_dim, hidden_dims, dropout=0.5):
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-    return model
+    layers = []
+    for h in hidden_dims:
+        layers.append(nn.Linear(prev_dim, h))
+        layers.append(nn.Dropout(dropout))
+    layers.append(nn.Linear(prev_dim, 1))
+    return nn.Sequential(*layers).to(device)
+    # model = keras.Sequential()
+    # model.add(keras.layers.Dense(300, input_dim = input_dim, activation='relu'))
+    # model.add(keras.layers.Dropout(0.5))
+    # model.add(keras.layers.Dense(150, activation='relu'))
+    # model.add(keras.layers.Dropout(0.5))
+    # model.add(keras.layers.Dense(50, activation='relu'))
+    # model.add(keras.layers.Dense(1, activation='sigmoid'))
+    # model.compile(
+    #     optimizer='adam', 
+    #     loss='binary_crossentropy', 
+    #     metrics = ['accuracy'])
+    # return model
 
 # Determines the most important bases in determining the model's confidence in the
 # window classification. Goes to each base in the window, and runs the classifier
@@ -391,6 +400,7 @@ def train_final(vectors, dataframe, n_examples, metadata, only_t, train_all, pro
 
     window = len(metadata['columns'])
     model = create_model(window)
+
     history = model.fit(
         dataset,
         epochs = 10,
