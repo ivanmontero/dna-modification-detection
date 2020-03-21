@@ -1,5 +1,6 @@
 import argparse
 
+# Imports necessary modules
 def import_modules():
     print ('Importing Modules')
     # Make the local imports global
@@ -129,8 +130,11 @@ def setup():
 
     return parser.parse_args()
 
+# Determines how many unique peaks that exist with at least min_peak_length length. A "peak"
+# is considered a contiguous block of positions that have a fold change value above threshold.
+# Each base is labeled in the given dataframe with the fold change peak it's associated with,
+# and zero otherwise.
 def label_peaks(dataframe, threshold, min_peak_length):
-    # TODO: Make this better. 
     chromosome_list = dataframe.index.get_level_values('chromosome').to_list()
     chromosome_length = [0]
     for chromosome in dataframe.index.unique('chromosome'):
@@ -170,6 +174,7 @@ def label_peaks(dataframe, threshold, min_peak_length):
 
     return dataframe
 
+# Computes quantities relating to peaks 
 def peak_j_curve(peak_ids, y_scores):
     # Sort the y_scores largest to smallest and order peak_ids by its index.
     sort_index = np.argsort(y_scores, kind="mergesort")[::-1]
@@ -203,17 +208,21 @@ def peak_j_curve(peak_ids, y_scores):
 
     return peaks_with_j, js_with_peak
 
-def simple_threshold(dataframe):
+# The simple threshold by simply looking at the current IPD vakue and comparing it to 
+def simple_scores(dataframe):
     top_ipd = dataframe['top_ipd'].to_numpy()
     bottom_ipd = dataframe['bottom_ipd'].to_numpy()
     scores = np.maximum(top_ipd, bottom_ipd)
 
     return scores
 
+# The complex scores are computed by considering the sum of the max IPD values at the
+# 0, 2, and 6 position. A visualization of the IPD values taken into consideration are
+# below:
 #      Top: +6              +2      +0    
 # Position:  0   1   2   3   4   5   6   7   8   9   10  11  12
 #   Bottom:                         +0      +2               +6
-def complex_threshold(dataframe):
+def complex_scores(dataframe):
     top_ipd = dataframe['top_ipd'].to_numpy()
     bottom_ipd = dataframe['bottom_ipd'].to_numpy()
 
@@ -229,11 +238,14 @@ def complex_threshold(dataframe):
     bottom_sum = bottom_zero + bottom_two + bottom_six
     minimum = np.min(top_sum)
     scores = np.full(len(dataframe), minimum)
-
-    scores[6:-6] = np.maximum(top_sum[:-6], bottom_sum[6:])
+    
+    scores[:-6] = bottom_sum
+    scores[6:] = np.maximum(scores[6:], top_sum)
 
     return scores
 
+# Given scores, returns the receiver operator characteristic, precision recall, and peak
+# curves
 def get_metrics(dataframe, scores):
     condition = ((dataframe['top_A'] == 1) | (dataframe['top_T'] == 1))
     dataframe = dataframe.loc[condition]
@@ -275,6 +287,7 @@ def get_metrics(dataframe, scores):
 
     return receiver_operator, precision_recall, peak_curve
 
+# From a (m, d) numpy array, returns n_examples rows sampled randomly w/o replacement.
 def sample(vectors, n_examples):
     if len(vectors) <= n_examples:
         return vectors
@@ -285,6 +298,7 @@ def sample(vectors, n_examples):
 
 # We will define our model as a multi-layer densely connected neural network
 # with dropout between the layers.
+# TODO: Parameterize this
 def create_model(input_dim):
     model = keras.Sequential()
     model.add(keras.layers.Dense(300, input_dim = input_dim, activation='relu'))
@@ -352,6 +366,7 @@ def feature_importance(model, vectors, scores, metadata, progress_off, batch_siz
 
     return drops
 
+# Trains a odel on the entire passed in dataframe.
 def train_final(vectors, dataframe, n_examples, metadata, only_t, train_all, progress_off):
     labels = dataframe['label'].to_numpy()
 
@@ -384,6 +399,7 @@ def train_final(vectors, dataframe, n_examples, metadata, only_t, train_all, pro
 
     return model
 
+# Prepares a training fold dataset.
 def create_training_fold(vectors, labels, n_examples, train_all = False, batch_size = 32):
     # Filter on labels.
     positives = vectors[labels == 1]
@@ -414,6 +430,7 @@ def create_training_fold(vectors, labels, n_examples, train_all = False, batch_s
 
     return dataset, length
 
+# Prepares a validation fold dataset.
 def create_validation_fold(vectors, labels, batch_size = 32):
     # Convert to tensorflow dataset.
     dataset = tf.data.Dataset.from_tensor_slices((vectors, labels))
@@ -452,6 +469,7 @@ def train_network(model, training_dataset, length, progress_off, validation_spli
     
     return training_history, validation_history
 
+# Predicts on a provided valiation dataset.
 def validate_network(model, dataset, length, progress_off):
     # Create our custom TQDM progress bar for validation.
     if progress_off:
@@ -465,6 +483,7 @@ def validate_network(model, dataset, length, progress_off):
 
     return scores.reshape(-1)
 
+# Trains on a fold of the dataset.
 def train_fold(model, vectors, dataframe, n_examples, train_all, progress_off):
     labels = dataframe['label'].to_numpy()
     dataset, length = create_training_fold(
@@ -477,6 +496,7 @@ def train_fold(model, vectors, dataframe, n_examples, train_all, progress_off):
 
     return training_history, validation_history
 
+# Validates on a fold of the dataset.
 def validate_fold(model, vectors, dataframe, progress_off):
     labels = dataframe['label'].to_numpy()
     dataset, length = create_validation_fold(
@@ -487,6 +507,9 @@ def validate_fold(model, vectors, dataframe, progress_off):
 
     return  scores
 
+# Performs a k-fold experiment on the dataset, where k is equal to the number of chromosomes. On each fold, this method
+# obtains metrics by training on all examples from all chromosomes except a holdout one, then obtains metrics on the one
+# held out chromosome.
 def train_dataset(vectors, dataframe, threshold, n_examples, holdout, metadata, min_peak_length, train_all, progress_off):
     # Drop rows where there are any nulls.
     condition = vectors.any(axis = 1)
@@ -501,7 +524,7 @@ def train_dataset(vectors, dataframe, threshold, n_examples, holdout, metadata, 
     dataframe = label_peaks(dataframe, threshold, min_peak_length)
 
     # Remove test holdout chromosome.
-    index = dataframe.index.get_level_values('chromosome')
+    index = dataframe.index.get_level_values('chromosome')Î
     chromosomes = dataframe.index.unique(level = 'chromosome').to_list()
     if holdout:
         chromosomes.remove(holdout)
@@ -541,7 +564,7 @@ def train_dataset(vectors, dataframe, threshold, n_examples, holdout, metadata, 
         validation_dataframe = dataframe.loc[index == holdout]
 
         # Complex threshold baseline.
-        scores = complex_threshold(validation_dataframe)
+        scores = complex_scores(validation_dataframe)
 
         # Store metrics.
         roc, pr, peak = get_metrics(validation_dataframe, scores)
@@ -555,7 +578,7 @@ def train_dataset(vectors, dataframe, threshold, n_examples, holdout, metadata, 
         validation_dataframe = validation_dataframe.loc[condition]
 
         # Simple threshold baseline.
-        scores = simple_threshold(validation_dataframe)
+        scores = simple_scores(validation_dataframe)
 
         # Store metrics.
         roc, pr, peak = get_metrics(validation_dataframe, scores)
