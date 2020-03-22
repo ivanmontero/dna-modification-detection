@@ -302,7 +302,7 @@ def sample(vectors, n_examples):
 
 def fit(model, vectors, labels, epochs=10, batch_size=32, valid_vectors=None, valid_labels=None):  # TODO: Return history
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    opt = torch.optim.Adam(model.parameters(), lr=0.001)
+    opt = torch.optim.Adam(model.parameters())
 
     n = vectors.shape[0]
     dataset = torch.utils.data.TensorDataset(torch.tensor(vectors), torch.tensor(labels))
@@ -310,12 +310,12 @@ def fit(model, vectors, labels, epochs=10, batch_size=32, valid_vectors=None, va
 
     history = {stat: [] for stat in ["loss", "acc", "val_loss", "val_acc"]}
 
-    for epoch in tqdm(range(epochs)):
+    for epoch in tqdm(range(epochs), desc="Training", position=0):
         correct = 0
         cum_loss = 0.0
 
         # Train a single epoch
-        for bx, by in dataloader:
+        for bx, by in tqdm(dataloader, desc="Train Batch", position=1, leave=False):
             bx = bx.to(device).float()
             by = by.to(device).float()
 
@@ -349,7 +349,7 @@ def validate(model, vectors, labels, batch_size=32):
     correct = 0
     cum_loss = 0.0
     with torch.no_grad():
-        for bx, by in dataloader:
+        for bx, by in tqdm(dataloader, desc="Validation Batch", position=1, leave=False):
             bx = bx.to(device).float()
             by = by.to(device).float()
 
