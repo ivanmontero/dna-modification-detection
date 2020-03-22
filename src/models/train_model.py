@@ -298,6 +298,39 @@ def sample(vectors, n_examples):
         selection = np.random.choice(index, n_examples, replace = False)
         return vectors[selection]
 
+def fit(model, vectors, labels, epochs=10, batch_size=32):  # TODO: Return history
+    opt = nn.Adam(model.parameters())
+
+    dataset = nn.TensorDataset(torch.tensor(vectors), torch.tensor(labels))
+    dataloader = nn.DataLoader(dataset, batch_size=batch_size)
+
+    for epoch in range(epochs):
+        for bx, by in dataloader:
+            output = model(bx)
+            loss = F.binary_crossentropy(output, by)
+
+            opt.zero_grad()
+            loss.backward()
+            opt.step()
+
+    return model
+
+def validate(model, vectors, labels, batch_size):
+    dataset = nn.TensorDataset(torch.tensor(vectors), torch.tensor(labels))
+    dataloader = nn.DataLoader(dataset, batch_size=batch_size)
+
+    predictions = []
+    cumloss = 0.0
+    with torch.no_grad():
+        for bx, by in dataloader:
+            output = model(bx)
+            loss = F.binary_crossentropy(output, by)
+
+            predictions.append(output)
+            cumloss += 0.0
+    
+    return torch.cat(predictions, dim=0), cumloss / vectors.shape[0]
+
 # We will define our model as a multi-layer densely connected neural network
 # with dropout between the layers.
 # TODO: Parameterize this
@@ -309,6 +342,7 @@ def create_model(input_dim, hidden_dims, dropout=0.5):
         layers.append(nn.Linear(prev_dim, h))
         layers.append(nn.Dropout(dropout))
     layers.append(nn.Linear(prev_dim, 1))
+
     return nn.Sequential(*layers).to(device)
     # model = keras.Sequential()
     # model.add(keras.layers.Dense(300, input_dim = input_dim, activation='relu'))
@@ -386,26 +420,28 @@ def train_final(vectors, dataframe, n_examples, metadata, only_t, train_all, pro
         labels = labels[condition]
 
     # Create the dataset. 
-    dataset, length = create_training_fold(
+    vectors, labels, length = create_training_fold(
         vectors = vectors,
         labels = labels,
         n_examples = n_examples,
         train_all = train_all)
 
-    # Create out custom TQDM progress bar for training.
-    if progress_off:
-        callback = progress_bars.no_progress()
-    else:
-        callback = progress_bars.train_progress(length)
+    # # Create out custom TQDM progress bar for training.
+    # if progress_off:
+    #     callback = progress_bars.no_progress()
+    # else:
+    #     callback = progress_bars.train_progress(length)
 
     window = len(metadata['columns'])
-    model = create_model(window)
+    model = create_model(window, [300, 150, 50])
 
-    history = model.fit(
-        dataset,
-        epochs = 10,
-        verbose = 0,
-        callbacks = [callback])
+    model = fit(model, vectors, labels)
+
+    # history = model.fit(
+    #     dataset,
+    #     epochs = 10,
+    #     verbose = 0,
+    #     callbacks = [callback])
 
     return model
 
@@ -431,14 +467,14 @@ def create_training_fold(vectors, labels, n_examples, train_all = False, batch_s
     vectors = vectors[index]
     labels = labels[index]
 
-    # Convert to tensorflow dataset.
-    dataset = tf.data.Dataset.from_tensor_slices((vectors, labels))
-    dataset = dataset.batch(batch_size)
+    # # Convert to tensorflow dataset.
+    # dataset = tf.data.Dataset.from_tensor_slices((vectors, labels))
+    # dataset = dataset.batch(batch_size)
 
     # Compute the number of batches.
     length = int(np.ceil(length/batch_size))
 
-    return dataset, length
+    return vectors, labels, length
 
 # Prepares a validation fold dataset.
 def create_validation_fold(vectors, labels, batch_size = 32):
@@ -496,7 +532,7 @@ def validate_network(model, dataset, length, progress_off):
 # Trains on a fold of the dataset.
 def train_fold(model, vectors, dataframe, n_examples, train_all, progress_off):
     labels = dataframe['label'].to_numpy()
-    dataset, length = create_training_fold(
+    vectors, labels, length = create_training_fold(
         vectors = vectors,
         labels = labels,
         n_examples = n_examples,
@@ -562,7 +598,7 @@ def train_dataset(vectors, dataframe, threshold, n_examples, holdout, metadata, 
     }
 
     window = len(metadata['columns'])
-    model = create_model(window)
+    model = create_model(window, [300, 150, 50])
     index = dataframe.index.get_level_values('chromosome')
     for holdout in chromosomes:
         # Training fold.
