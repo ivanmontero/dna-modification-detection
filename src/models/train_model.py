@@ -497,7 +497,7 @@ def create_validation_fold(vectors, labels):
     return vectors, labels
 
 # Begin training the neural network, with optional validation data, and model saving.
-def train_network(model, vectors, labels, progress_off, validation_split = 0.1, epochs=32):
+def train_network(model, vectors, labels, progress_off, validation_split = 0.1, epochs=10):
     n_validation = int(vectors.shape[0]*validation_split)
     # Save 10% of the training to see how validation history looks.
     idx = np.random.permutation(vectors.shape[0])
