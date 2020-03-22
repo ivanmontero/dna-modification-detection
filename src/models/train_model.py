@@ -6,6 +6,7 @@ def import_modules():
     # Make the local imports global
         
     global progress_bars
+    global tqdm
     global plot_metrics
     global metrics
     global utils
@@ -41,6 +42,7 @@ def import_modules():
     import numpy as np
     import json
     import copy
+    from tqdm import tqdm
     utils.end_time(start)
 
 # Return argparse arguments. 
@@ -298,38 +300,83 @@ def sample(vectors, n_examples):
         selection = np.random.choice(index, n_examples, replace = False)
         return vectors[selection]
 
-def fit(model, vectors, labels, epochs=10, batch_size=32):  # TODO: Return history
-    opt = nn.Adam(model.parameters())
+def fit(model, vectors, labels, epochs=10, batch_size=32, valid_vectors=None, valid_labels=None):  # TODO: Return history
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    opt = torch.optim.Adam(model.parameters(), lr=0.001)
 
-    dataset = nn.TensorDataset(torch.tensor(vectors), torch.tensor(labels))
-    dataloader = nn.DataLoader(dataset, batch_size=batch_size)
+    n = vectors.shape[0]
+    dataset = torch.utils.data.TensorDataset(torch.tensor(vectors), torch.tensor(labels))
+    dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
-    for epoch in range(epochs):
+    history = {stat: [] for stat in ["loss", "acc", "val_loss", "val_acc"]}
+
+    for epoch in tqdm(range(epochs)):
+        correct = 0
+        cum_loss = 0.0
+
+        # Train a single epoch
         for bx, by in dataloader:
+            bx = bx.to(device).float()
+            by = by.to(device).float()
+
             output = model(bx)
-            loss = F.binary_crossentropy(output, by)
+            loss = F.binary_cross_entropy(output.reshape(-1), by)
 
             opt.zero_grad()
             loss.backward()
             opt.step()
 
-    return model
+            correct += ((output.reshape(-1) > 0.5).int() == by).float().sum().cpu().item()
+            cum_loss += loss.cpu().item()
 
-def validate(model, vectors, labels, batch_size):
-    dataset = nn.TensorDataset(torch.tensor(vectors), torch.tensor(labels))
-    dataloader = nn.DataLoader(dataset, batch_size=batch_size)
+        history["loss"].append(cum_loss / n)
+        history["acc"].append(correct / n)
 
-    predictions = []
-    cumloss = 0.0
+        if valid_vectors is not None:
+            val_loss, val_acc = validate(model, valid_vectors, valid_labels, batch_size)
+            history["val_loss"].append(val_loss)
+            history["val_acc"].append(val_acc)
+
+    return history
+
+def validate(model, vectors, labels, batch_size=32):
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+    n = vectors.shape[0]
+    dataset = torch.utils.data.TensorDataset(torch.tensor(vectors), torch.tensor(labels))
+    dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size)
+
+    correct = 0
+    cum_loss = 0.0
     with torch.no_grad():
         for bx, by in dataloader:
-            output = model(bx)
-            loss = F.binary_crossentropy(output, by)
+            bx = bx.to(device).float()
+            by = by.to(device).float()
 
-            predictions.append(output)
-            cumloss += 0.0
+            output = model(bx)
+            loss = F.binary_cross_entropy(output.reshape(-1), by)
+
+            cum_loss += loss.cpu().item()
+            correct += ((output.reshape(-1) > 0.5).int() == by).float().sum().cpu().item()
     
-    return torch.cat(predictions, dim=0), cumloss / vectors.shape[0]
+    return cum_loss / n, correct / n
+
+def predict(model, vectors, batch_size=32):
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+    n = vectors.shape[0]
+    # dataset = torch.utils.data.TensorDataset(torch.tensor(vectors))
+    dataloader = torch.utils.data.DataLoader(torch.tensor(vectors), batch_size=batch_size)
+
+    predictions = []
+    with torch.no_grad():
+        for bx in dataloader:
+            bx = bx.to(device).float()
+
+            output = model(bx)
+            predictions.append(output)
+    
+    return torch.cat(predictions, dim=0).cpu().numpy()
 
 # We will define our model as a multi-layer densely connected neural network
 # with dropout between the layers.
@@ -338,10 +385,13 @@ def create_model(input_dim, hidden_dims, dropout=0.5):
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     layers = []
+    prev_dim = input_dim
     for h in hidden_dims:
         layers.append(nn.Linear(prev_dim, h))
         layers.append(nn.Dropout(dropout))
+        prev_dim = h
     layers.append(nn.Linear(prev_dim, 1))
+    layers.append(nn.Sigmoid())
 
     return nn.Sequential(*layers).to(device)
     # model = keras.Sequential()
@@ -391,17 +441,22 @@ def feature_importance(model, vectors, scores, metadata, progress_off, batch_siz
         alternate_vectors[i*length:(i+1)*length,:] = current.copy()
 
     # Convert to tensorflow dataset.
-    dataset = tf.data.Dataset.from_tensor_slices(alternate_vectors)
-    dataset = dataset.batch(batch_size)
+    # dataset = tf.data.Dataset.from_tensor_slices(alternate_vectors)
+    # dataset = dataset.batch(batch_size)
 
     # Compute the number of batches.
-    length = int(np.ceil(len(alternate_vectors)/batch_size))
+    # length = int(np.ceil(len(alternate_vectors)/batch_size))
 
+    # new_predictions = validate_network(
+    #     model = model, 
+    #     dataset = dataset,
+    #     length = length, 
+    #     progress_off = progress_off)
     new_predictions = validate_network(
-        model = model, 
-        dataset = dataset,
-        length = length, 
-        progress_off = progress_off)
+        model,
+        alternate_vectors,
+        progress_off
+    )
 
     # Get the aggregate new prediction and find the delta. 
     new_predictions = new_predictions.reshape(3,-1)
@@ -435,7 +490,7 @@ def train_final(vectors, dataframe, n_examples, metadata, only_t, train_all, pro
     window = len(metadata['columns'])
     model = create_model(window, [300, 150, 50])
 
-    model = fit(model, vectors, labels)
+    history = fit(model, vectors, labels)
 
     # history = model.fit(
     #     dataset,
@@ -474,84 +529,92 @@ def create_training_fold(vectors, labels, n_examples, train_all = False, batch_s
     # Compute the number of batches.
     length = int(np.ceil(length/batch_size))
 
-    return vectors, labels, length
+    return vectors, labels
 
 # Prepares a validation fold dataset.
-def create_validation_fold(vectors, labels, batch_size = 32):
+def create_validation_fold(vectors, labels):
     # Convert to tensorflow dataset.
-    dataset = tf.data.Dataset.from_tensor_slices((vectors, labels))
-    dataset = dataset.batch(batch_size)
+    # dataset = tf.data.Dataset.from_tensor_slices((vectors, labels))
+    # dataset = dataset.batch(batch_size)
 
     # Compute the number of batches.
-    length = int(np.ceil(len(vectors)/batch_size))
+    # length = int(np.ceil(len(vectors)/batch_size))
 
-    return dataset, length
+    # return dataset, length
+    return vectors, labels
 
 # Begin training the neural network, with optional validation data, and model saving.
-def train_network(model, training_dataset, length, progress_off, validation_split = 0.1):
+def train_network(model, vectors, labels, progress_off, validation_split = 0.1, epochs=32):
     # TODO: There doesn't seem to be a great way to get the length of a
     # tf.DataSet, so instead we resort to passing the variable.
-    n_validation = int(length*validation_split)
+    n_validation = int(vectors.shape[0]*validation_split)
     # Save 10% of the training to see how validation history looks.
-    validation_dataset = training_dataset.take(n_validation) 
-    training_dataset = training_dataset.skip(n_validation)
+    idx = np.random.permutation(vectors.shape[0])
+    valid_idx, train_idx = idx[:n_validation], idx[n_validation:]
 
-    # Create out custom TQDM progress bar for training.
-    if progress_off:
-        callback = progress_bars.no_progress()
-    else:
-        callback = progress_bars.train_progress(length)
+    # # Create out custom TQDM progress bar for training.
+    # if progress_off:
+    #     callback = progress_bars.no_progress()
+    # else:
+    #     callback = progress_bars.train_progress(length)
 
-    history = model.fit(
-        training_dataset,
-        validation_data = validation_dataset,
-        epochs = 10,
-        verbose = 0,
-        callbacks = [callback])
+    # history = model.fit(
+    #     training_dataset,
+    #     validation_data = validation_dataset,
+    #     epochs = 10,
+    #     verbose = 0,
+    #     callbacks = [callback])
+    history = fit(
+        model,
+        vectors[train_idx],
+        labels[train_idx],
+        valid_vectors=vectors[valid_idx],
+        valid_labels=labels[valid_idx],
+        epochs=epochs)
 
-    epochs = range(1, len(history.history['accuracy']) + 1)
-    training_history = {'x': epochs, 'y': history.history['accuracy'], 'area': None}
-    validation_history = {'x': epochs, 'y': history.history['val_accuracy'], 'area': None}
+    training_history = {'x': range(1, epochs + 1), 'y': history['acc'], 'area': None}
+    validation_history = {'x': range(1, epochs + 1), 'y': history['val_acc'], 'area': None}
     
     return training_history, validation_history
 
 # Predicts on a provided valiation dataset.
-def validate_network(model, dataset, length, progress_off):
-    # Create our custom TQDM progress bar for validation.
-    if progress_off:
-        callback = progress_bars.no_progress()
-    else:
-        callback = progress_bars.predict_progress(length)
+def validate_network(model, vectors, progress_off):
+    # # Create our custom TQDM progress bar for validation.
+    # if progress_off:
+    #     callback = progress_bars.no_progress()
+    # else:
+    #     callback = progress_bars.predict_progress(length)
     
-    scores = model.predict(
-        dataset,
-        callbacks = [callback])
+    # scores = model.predict(
+    #     dataset,
+    #     callbacks = [callback])
+    scores = predict(model, vectors)
 
     return scores.reshape(-1)
 
 # Trains on a fold of the dataset.
 def train_fold(model, vectors, dataframe, n_examples, train_all, progress_off):
     labels = dataframe['label'].to_numpy()
-    vectors, labels, length = create_training_fold(
+    vectors, labels = create_training_fold(
         vectors = vectors,
         labels = labels,
         n_examples = n_examples,
         train_all = train_all)
 
-    training_history, validation_history = train_network(model, dataset, length, progress_off)
+    training_history, validation_history = train_network(model, vectors, labels, progress_off)
 
     return training_history, validation_history
 
 # Validates on a fold of the dataset.
 def validate_fold(model, vectors, dataframe, progress_off):
     labels = dataframe['label'].to_numpy()
-    dataset, length = create_validation_fold(
+    vectors, _ = create_validation_fold(
         vectors = vectors,
         labels = labels)
 
-    scores = validate_network(model, dataset, length, progress_off)
+    scores = validate_network(model, vectors, progress_off)
 
-    return  scores
+    return scores
 
 # Performs a k-fold experiment on the dataset, where k is equal to the number of chromosomes. On each fold, this method
 # obtains metrics by training on all examples from all chromosomes except a holdout one, then obtains metrics on the one
@@ -570,7 +633,7 @@ def train_dataset(vectors, dataframe, threshold, n_examples, holdout, metadata, 
     dataframe = label_peaks(dataframe, threshold, min_peak_length)
 
     # Remove test holdout chromosome.
-    index = dataframe.index.get_level_values('chromosome')Î
+    index = dataframe.index.get_level_values('chromosome')
     chromosomes = dataframe.index.unique(level = 'chromosome').to_list()
     if holdout:
         chromosomes.remove(holdout)
@@ -649,7 +712,8 @@ def train_dataset(vectors, dataframe, threshold, n_examples, holdout, metadata, 
             vectors = validation_vectors,
             dataframe = validation_dataframe,
             progress_off = progress_off)
-        model.reset_states()
+        # model.reset_states()
+        model = create_model(window, [300, 150, 50])
 
         # Store metrics.
         roc, pr, peak = get_metrics(validation_dataframe, scores)
@@ -693,7 +757,8 @@ def train_dataset(vectors, dataframe, threshold, n_examples, holdout, metadata, 
             vectors = validation_vectors,
             dataframe = validation_dataframe,
             progress_off = progress_off)
-        model.reset_states()
+        # model.reset_states()
+        model = create_model(window, [300, 150, 50])
 
         # Store metrics.
         roc, pr, peak = get_metrics(validation_dataframe, scores)
@@ -792,7 +857,10 @@ def main():
     vectors = np.load(arguments.input)
     with open(arguments.metadata) as infile:
         metadata = json.load(infile)
-    utils.end_time(start) 
+    utils.end_time(start)
+
+    print("Model architecture:")
+    print(create_model(vectors.shape[1], [300, 150, 50]))
 
     # Training model.
     print("Training Model")
