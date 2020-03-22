@@ -388,6 +388,7 @@ def create_model(input_dim, hidden_dims, dropout=0.5):
     prev_dim = input_dim
     for h in hidden_dims:
         layers.append(nn.Linear(prev_dim, h))
+        layers.append(nn.ReLU())
         layers.append(nn.Dropout(dropout))
         prev_dim = h
     layers.append(nn.Linear(prev_dim, 1))
