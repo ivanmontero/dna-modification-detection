@@ -524,7 +524,7 @@ def train_dataset(vectors, dataframe, threshold, n_examples, holdout, metadata, 
     dataframe = label_peaks(dataframe, threshold, min_peak_length)
 
     # Remove test holdout chromosome.
-    index = dataframe.index.get_level_values('chromosome')Î
+    index = dataframe.index.get_level_values('chromosome')
     chromosomes = dataframe.index.unique(level = 'chromosome').to_list()
     if holdout:
         chromosomes.remove(holdout)
