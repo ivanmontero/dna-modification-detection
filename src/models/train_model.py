@@ -452,7 +452,7 @@ def train_final(vectors, dataframe, n_examples, metadata, only_t, train_all, pro
         labels = labels[condition]
 
     # Create the dataset. 
-    vectors, labels, length = create_training_fold(
+    vectors, labels = create_training_fold(
         vectors = vectors,
         labels = labels,
         n_examples = n_examples,
@@ -835,7 +835,8 @@ def main():
             train_all = arguments.train_all,
             progress_off = arguments.progress_off)
 
-        model.save(filename)
+        # model.save(filename)
+        torch.save(model, filename)
         utils.end_time(start)
 
     total_time = utils.end_time(total_start, True)
