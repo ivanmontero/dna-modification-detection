@@ -395,18 +395,6 @@ def create_model(input_dim, hidden_dims, dropout=0.5):
     layers.append(nn.Sigmoid())
 
     return nn.Sequential(*layers).to(device)
-    # model = keras.Sequential()
-    # model.add(keras.layers.Dense(300, input_dim = input_dim, activation='relu'))
-    # model.add(keras.layers.Dropout(0.5))
-    # model.add(keras.layers.Dense(150, activation='relu'))
-    # model.add(keras.layers.Dropout(0.5))
-    # model.add(keras.layers.Dense(50, activation='relu'))
-    # model.add(keras.layers.Dense(1, activation='sigmoid'))
-    # model.compile(
-    #     optimizer='adam', 
-    #     loss='binary_crossentropy', 
-    #     metrics = ['accuracy'])
-    # return model
 
 # Determines the most important bases in determining the model's confidence in the
 # window classification. Goes to each base in the window, and runs the classifier
@@ -441,18 +429,6 @@ def feature_importance(model, vectors, scores, metadata, progress_off, batch_siz
         current[:,center_indexing] = np.roll(to_rotate, i+1, axis = 1)
         alternate_vectors[i*length:(i+1)*length,:] = current.copy()
 
-    # Convert to tensorflow dataset.
-    # dataset = tf.data.Dataset.from_tensor_slices(alternate_vectors)
-    # dataset = dataset.batch(batch_size)
-
-    # Compute the number of batches.
-    # length = int(np.ceil(len(alternate_vectors)/batch_size))
-
-    # new_predictions = validate_network(
-    #     model = model, 
-    #     dataset = dataset,
-    #     length = length, 
-    #     progress_off = progress_off)
     new_predictions = validate_network(
         model,
         alternate_vectors,
@@ -482,22 +458,10 @@ def train_final(vectors, dataframe, n_examples, metadata, only_t, train_all, pro
         n_examples = n_examples,
         train_all = train_all)
 
-    # # Create out custom TQDM progress bar for training.
-    # if progress_off:
-    #     callback = progress_bars.no_progress()
-    # else:
-    #     callback = progress_bars.train_progress(length)
-
     window = len(metadata['columns'])
     model = create_model(window, [300, 150, 50])
 
     history = fit(model, vectors, labels)
-
-    # history = model.fit(
-    #     dataset,
-    #     epochs = 10,
-    #     verbose = 0,
-    #     callbacks = [callback])
 
     return model
 
@@ -523,10 +487,6 @@ def create_training_fold(vectors, labels, n_examples, train_all = False, batch_s
     vectors = vectors[index]
     labels = labels[index]
 
-    # # Convert to tensorflow dataset.
-    # dataset = tf.data.Dataset.from_tensor_slices((vectors, labels))
-    # dataset = dataset.batch(batch_size)
-
     # Compute the number of batches.
     length = int(np.ceil(length/batch_size))
 
@@ -534,37 +494,15 @@ def create_training_fold(vectors, labels, n_examples, train_all = False, batch_s
 
 # Prepares a validation fold dataset.
 def create_validation_fold(vectors, labels):
-    # Convert to tensorflow dataset.
-    # dataset = tf.data.Dataset.from_tensor_slices((vectors, labels))
-    # dataset = dataset.batch(batch_size)
-
-    # Compute the number of batches.
-    # length = int(np.ceil(len(vectors)/batch_size))
-
-    # return dataset, length
     return vectors, labels
 
 # Begin training the neural network, with optional validation data, and model saving.
 def train_network(model, vectors, labels, progress_off, validation_split = 0.1, epochs=32):
-    # TODO: There doesn't seem to be a great way to get the length of a
-    # tf.DataSet, so instead we resort to passing the variable.
     n_validation = int(vectors.shape[0]*validation_split)
     # Save 10% of the training to see how validation history looks.
     idx = np.random.permutation(vectors.shape[0])
     valid_idx, train_idx = idx[:n_validation], idx[n_validation:]
 
-    # # Create out custom TQDM progress bar for training.
-    # if progress_off:
-    #     callback = progress_bars.no_progress()
-    # else:
-    #     callback = progress_bars.train_progress(length)
-
-    # history = model.fit(
-    #     training_dataset,
-    #     validation_data = validation_dataset,
-    #     epochs = 10,
-    #     verbose = 0,
-    #     callbacks = [callback])
     history = fit(
         model,
         vectors[train_idx],
@@ -580,18 +518,7 @@ def train_network(model, vectors, labels, progress_off, validation_split = 0.1, 
 
 # Predicts on a provided valiation dataset.
 def validate_network(model, vectors, progress_off):
-    # # Create our custom TQDM progress bar for validation.
-    # if progress_off:
-    #     callback = progress_bars.no_progress()
-    # else:
-    #     callback = progress_bars.predict_progress(length)
-    
-    # scores = model.predict(
-    #     dataset,
-    #     callbacks = [callback])
-    scores = predict(model, vectors)
-
-    return scores.reshape(-1)
+    return predict(model, vectors).reshape(-1)
 
 # Trains on a fold of the dataset.
 def train_fold(model, vectors, dataframe, n_examples, train_all, progress_off):
@@ -662,7 +589,6 @@ def train_dataset(vectors, dataframe, threshold, n_examples, holdout, metadata, 
     }
 
     window = len(metadata['columns'])
-    model = create_model(window, [300, 150, 50])
     index = dataframe.index.get_level_values('chromosome')
     for holdout in chromosomes:
         # Training fold.
@@ -696,6 +622,7 @@ def train_dataset(vectors, dataframe, threshold, n_examples, holdout, metadata, 
         results['precision_recall'].append(pr)
         results['peak_curve'].append(peak)
 
+        model = create_model(window, [300, 150, 50])
         training_history, validation_history = train_fold(
             model = model,
             vectors = training_vectors,
@@ -714,7 +641,6 @@ def train_dataset(vectors, dataframe, threshold, n_examples, holdout, metadata, 
             dataframe = validation_dataframe,
             progress_off = progress_off)
         # model.reset_states()
-        model = create_model(window, [300, 150, 50])
 
         # Store metrics.
         roc, pr, peak = get_metrics(validation_dataframe, scores)
@@ -741,6 +667,7 @@ def train_dataset(vectors, dataframe, threshold, n_examples, holdout, metadata, 
         training_vectors = training_vectors[condition]
         training_dataframe = training_dataframe.loc[condition]
 
+        model = create_model(window, [300, 150, 50])
         training_history, validation_history = train_fold(
             model = model,
             vectors = training_vectors,
