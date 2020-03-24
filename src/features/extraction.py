@@ -211,12 +211,18 @@ def main():
         process.start()
         processes.append(process)
 
+    # Get all the results back. 
     results = []
-    while multiprocessing.active_children():
+    for i in range(multiprocessing.cpu_count()):
         results.append(queue.get())
+
+    # Make sure the jobs are finished. 
+    for process in processes:
+        process.join()
 
     utils.end_time(start)
 
+    # Order the results so they match input order.
     start = utils.start_time('Combining Data')
     results = combine(results, arguments.window)
     utils.end_time(start)

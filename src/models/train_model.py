@@ -746,11 +746,12 @@ def main():
     print ('Plotting Performance')
     project_folder = utils.project_path()
     reports_folder = os.path.join(project_folder, 'reports')
+    training_folder = os.path.join(reports_folder, 'training')
     # Create filename.
     if arguments.prefix:
-        filename = os.path.join(reports_folder, f'{arguments.prefix}_model_performance.pdf')
+        filename = os.path.join(training_folder, f'{arguments.prefix}_model_performance.pdf')
     else:
-        filename = os.path.join(reports_folder, 'model_performance.pdf')
+        filename = os.path.join(training_folder, 'model_performance.pdf')
     plot_metrics.plot_pdf(results, filename)
 
     if not arguments.skip_final:

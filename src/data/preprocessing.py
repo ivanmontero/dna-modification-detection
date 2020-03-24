@@ -201,11 +201,12 @@ def main():
     start = utils.start_time('Plotting histograms.')
     project_folder = utils.project_path()
     reports_folder = os.path.join(project_folder, 'reports')
+    preprocessing_folder = os.path.join(reports_folder, 'preprocessing')
 
     if arguments.prefix:
-        filename = os.path.join(reports_folder, f'{arguments.prefix}_histograms.pdf')
+        filename = os.path.join(preprocessing_folder, f'{arguments.prefix}_histograms.pdf')
     else:
-        filename = os.path.join(reports_folder, 'histograms.pdf')
+        filename = os.path.join(preprocessing_folder, 'histograms.pdf')
 
     plot(ipd, filename, arguments.fold_change)
     utils.end_time(start)
