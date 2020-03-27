@@ -48,6 +48,12 @@ def setup():
         '--prefix', 
         default = False,
         help = 'Output prefix.')
+
+    parser.add_argument(
+        '-od', 
+        '--outdir', 
+        default = None,
+        help = 'Output directory.')
     
     return parser.parse_args()
 
@@ -187,9 +193,10 @@ def main():
     data = pd.read_hdf(arguments.infile)
 
     # Get the folder path for the data folders.
-    project_folder = utils.project_path()
+    project_folder = utils.project_path(arguments.outdir)
     data_folder = os.path.join(project_folder, 'data')
     interm_folder = os.path.join(data_folder, 'interm')
+    os.makedirs(interm_folder, exist_ok=True)
 
     # Chunk the dataset into the number of processors.
     data, total = chunking(
@@ -224,6 +231,7 @@ def main():
     # Save the feature vectors as numpy arrays.
     start = utils.start_time('Saving Data')
     processed_folder = os.path.join(data_folder, 'processed')
+    os.makedirs(processed_folder, exist_ok=True)
     if arguments.prefix:
         filename = os.path.join(processed_folder, f'{arguments.prefix}_data.npy')
     else:

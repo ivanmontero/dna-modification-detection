@@ -75,6 +75,12 @@ def setup():
         action = 'store_true',
         help = argparse.SUPPRESS)
 
+    parser.add_argument(
+        '-od', 
+        '--outdir', 
+        default = None,
+        help = 'Output directory.')
+
     return parser.parse_args()
 
 def predict(model, vectors, progress_off, batch_size = 32):
@@ -181,9 +187,10 @@ def main():
         progress_off = arguments.progress_off)
     dataframe.loc[condition, 'score'] = scores
 
-    project_folder = utils.project_path()
+    project_folder = utils.project_path(arguments.outdir)
     reports_folder = os.path.join(project_folder, 'reports')
     predict_folder = os.path.join(reports_folder, 'predict')
+    os.makedirs(predict_folder, exist_ok=True)
     if arguments.prefix:
         filename = os.path.join(predict_folder, f'{arguments.prefix}_predict.png')
     else:
