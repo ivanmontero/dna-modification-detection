@@ -213,12 +213,8 @@ def main():
 
     # Get all the results back. 
     results = []
-    for i in range(multiprocessing.cpu_count()):
+    while multiprocessing.active_children():
         results.append(queue.get())
-
-    # Make sure the jobs are finished. 
-    for process in processes:
-        process.join()
 
     utils.end_time(start)
 
