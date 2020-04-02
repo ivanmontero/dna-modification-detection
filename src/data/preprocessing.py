@@ -36,6 +36,12 @@ def setup():
         default = False,
         help = 'Output prefix.')
 
+    parser.add_argument(
+        '-od', 
+        '--outdir', 
+        default = None,
+        help = 'Output directory.')
+
     return parser.parse_args()
 
 # Plot histograms of the data. 
@@ -199,9 +205,10 @@ def main():
 
     # Plot the histograms of each feature. 
     start = utils.start_time('Plotting histograms.')
-    project_folder = utils.project_path()
+    project_folder = utils.project_path(arguments.outdir)
     reports_folder = os.path.join(project_folder, 'reports')
     preprocessing_folder = os.path.join(reports_folder, 'preprocessing')
+    os.makedirs(preprocessing_folder, exist_ok=True)
 
     if arguments.prefix:
         filename = os.path.join(preprocessing_folder, f'{arguments.prefix}_histograms.pdf')
@@ -217,6 +224,7 @@ def main():
 
     data_folder = os.path.join(project_folder, 'data')
     interm_folder = os.path.join(data_folder, 'interm')
+    os.makedirs(interm_folder, exist_ok=True)
     if arguments.prefix:
         filename = os.path.join(interm_folder, f'{arguments.prefix}_data.h5')
     else:

@@ -19,10 +19,13 @@ def end_time(start, stop = False):
     print (f'{string} elapsed.')
 
 # Return path to project level. 
-def project_path():
-    script_path = os.path.abspath(__file__)
-    script_folder = os.path.dirname(script_path)
-    src_folder = os.path.dirname(script_folder)
-    project_folder = os.path.dirname(src_folder)
-    
-    return project_folder
+def project_path(outdir = None):
+    if outdir is None:
+        script_path = os.path.abspath(__file__)
+        script_folder = os.path.dirname(script_path)
+        src_folder = os.path.dirname(script_folder)
+        project_folder = os.path.dirname(src_folder)
+
+        return project_folder
+    else:
+        return outdir

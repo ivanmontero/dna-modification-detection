@@ -60,6 +60,12 @@ def setup():
         default = False,
         help = 'Output prefix.')
 
+    parser.add_argument(
+        '-od', 
+        '--outdir', 
+        default = None,
+        help = 'Output directory.')
+
     # Turn progress bars off. 
     parser.add_argument(
         '--progress-off',
@@ -276,9 +282,10 @@ def main():
     model = keras.models.load_model(arguments.model)
 
     # Determine filename.
-    project_folder = utils.project_path()
+    project_folder = utils.project_path(arguments.outdir)
     reports_folder = os.path.join(project_folder, 'reports')
     predict_folder = os.path.join(reports_folder, 'predict')
+    os.makedirs(predict_folder, exist_ok=True)
     if arguments.prefix:
         filename = os.path.join(predict_folder, f'{arguments.prefix}_predict.pdf')
     else:
