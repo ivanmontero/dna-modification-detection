@@ -66,6 +66,9 @@ def windows(chunk, queue, counter, progress):
     window = chunk['window']
     position = chunk['position']
     folder = chunk['folder']
+    wp = chunk['results']
+    s = chunk['start']
+    e = chunk['end']
 
     # Radius is half the window size rounded down. So 51 is 25. 
     radius = int((window - 1)/2)
@@ -73,7 +76,7 @@ def windows(chunk, queue, counter, progress):
     # Update progress bar after this many rows. 
     interval = 500
     columns = data.shape[1]
-    vectors = [[0] * columns * window] * len(data)
+    # vectors = [[0] * columns * window] * len(data)
 
     # Skip the first radius rows, and the last radius rows since we can't get
     # full windows there anyways.
@@ -98,42 +101,41 @@ def windows(chunk, queue, counter, progress):
         
         # # Flattens the section of the table using column first Fortran method.
         vector = section.flatten(order = 'F')
-        vectors[i] = vector
+        # vectors[i] = vector
+        wp[s+i,:] = vector
 
     with counter.get_lock():
         counter.value += (i % interval)
         progress.n = counter.value
         progress.refresh()
 
-    vectors = np.array(vectors)
-    nbytes = vectors.nbytes
-    splits = np.ceil(nbytes/1e9)
-    chunks = np.array_split(vectors, splits)
+    print(position)
+    # vectors = np.array(vectors)
+    # nbytes = vectors.nbytes
+    # splits = np.ceil(nbytes/1e9)
+    # chunks = np.array_split(vectors, splits)
 
-    for i in range(len(chunks)):
-        queue.put((position, i, chunks[i]))
+    # for i in range(len(chunks)):
+    queue.put(position)
 
 # Divide the table into the number of cores available so we can use the 
 # multiprocessing package. 
-def chunking(data, interm_folder, window):
-    index = data.index.get_level_values('position').to_numpy()
-    array = data.to_numpy()
-
+def chunking(dp, index, interm_folder, window, wp):
     radius = int((window - 1)/2)
     # The chunk size is the number of rows assigned to each core. We never want 
     # to have left over rows so we add one. 
     num_processes = multiprocessing.cpu_count()
-    chunk_size = int(len(data)/num_processes) + 1
+    chunk_size = int(dp.shape[0]/num_processes) + 1
 
     chunks = []
     position = 0
     total = 0
-    for i in range(0, len(data), chunk_size):
+    for i in range(0, dp.shape[0], chunk_size):
         start = max(i - radius, 0)
         end = i + chunk_size + radius + 1
 
-        section = array[start:end].copy()
-        index_section = index[start:end].copy()
+        section = dp[start:end]
+        index_section = index[start:end]
 
         total  += len(section) - radius - 2
 
@@ -143,6 +145,9 @@ def chunking(data, interm_folder, window):
             'window': window,
             'position': position,
             'folder': interm_folder,
+            'results': wp,
+            'start': start,
+            'end': end
         })
         position += 1
 
@@ -190,7 +195,7 @@ def main():
     # Read the data and use only the necessary columns for creating feature
     # vectors.
     start = utils.start_time('Reading Data')
-    data = pd.read_hdf(arguments.infile)
+    data = pd.read_hdf(arguments.infile)[arguments.columns]
 
     # Get the folder path for the data folders.
     project_folder = utils.project_path(arguments.outdir)
@@ -198,11 +203,30 @@ def main():
     interm_folder = os.path.join(data_folder, 'interm')
     os.makedirs(interm_folder, exist_ok=True)
 
+    # Create memmap to read from
+    index = data.index.get_level_values('position').to_numpy()
+    array = data.to_numpy()
+    dp = np.memmap(interm_folder+"/data.npy", dtype='float32', mode='w+', shape=array.shape)
+    dp[:,:] = array[:,:]
+
+    # Create file to hold results
+    processed_folder = os.path.join(data_folder, 'processed')
+    os.makedirs(processed_folder, exist_ok=True)
+    if arguments.prefix:
+        filename = os.path.join(processed_folder, f'{arguments.prefix}_data.npy')
+    else:
+        filename = os.path.join(processed_folder, 'data.npy')
+    # np.save(filename, results)
+    wp = np.memmap(filename, dtype='float32', mode='w+', shape=(dp.shape[0],arguments.window*len(arguments.columns)))
+
+
     # Chunk the dataset into the number of processors.
     data, total = chunking(
-        data[arguments.columns],
+        dp,
+        index,
         interm_folder,
-        arguments.window)
+        arguments.window,
+        wp)
     utils.end_time(start)
 
     # Setup the progress bar.
@@ -210,6 +234,7 @@ def main():
     counter = multiprocessing.Value('i', 0)
     queue = multiprocessing.SimpleQueue()
     progress = tqdm.tqdm(total = total, unit = ' rows', leave = False)
+
 
     # Send off one job for each chunk.
     processes = []
@@ -220,26 +245,30 @@ def main():
 
     # Get all the results back. 
     results = []
-    while multiprocessing.active_children():
-        results.append(queue.get())
+    for p in processes:
+        p.join()
+    # while multiprocessing.active_children():
+    #     print(sorted(results))
+    #     # print(multiprocessing.active_children())
+    #     results.append(queue.get())
 
     utils.end_time(start)
 
-    # Order the results so they match input order.
-    start = utils.start_time('Combining Data')
-    results = combine(results, arguments.window)
-    utils.end_time(start)
+    # # Order the results so they match input order.
+    # start = utils.start_time('Combining Data')
+    # results = combine(results, arguments.window)
+    # utils.end_time(start)
 
     # Save the feature vectors as numpy arrays.
-    start = utils.start_time('Saving Data')
-    processed_folder = os.path.join(data_folder, 'processed')
-    os.makedirs(processed_folder, exist_ok=True)
-    if arguments.prefix:
-        filename = os.path.join(processed_folder, f'{arguments.prefix}_data.npy')
-    else:
-        filename = os.path.join(processed_folder, 'data.npy')
-    np.save(filename, results)
-
+    # start = utils.start_time('Saving Data')
+    # processed_folder = os.path.join(data_folder, 'processed')
+    # os.makedirs(processed_folder, exist_ok=True)
+    # if arguments.prefix:
+    #     filename = os.path.join(processed_folder, f'{arguments.prefix}_data.npy')
+    # else:
+    #     filename = os.path.join(processed_folder, 'data.npy')
+    # np.save(filename, results)
+    print("here")
     # Save the metadata for later. 
     column_labels = []
     for column in arguments.columns:
