@@ -4,7 +4,7 @@ import argparse
 import time
 import json
 import tqdm
-
+import shutil
 # Add Helper Functions
 import sys
 import os
@@ -73,7 +73,9 @@ def windows(chunk, queue, counter, progress):
     # Update progress bar after this many rows. 
     interval = 500
     columns = data.shape[1]
-    vectors = [[0] * columns * window] * len(data)
+    os.makedirs(folder+"/tmp/", exist_ok=True)
+    vectors = np.memmap(folder+f"/tmp/tmp{position}.npy", dtype='float32', mode='w+', shape=(len(data),columns*window))
+    # vectors = [[0] * columns * window] * len(data)
 
     # Skip the first radius rows, and the last radius rows since we can't get
     # full windows there anyways.
@@ -105,7 +107,7 @@ def windows(chunk, queue, counter, progress):
         progress.n = counter.value
         progress.refresh()
 
-    vectors = np.array(vectors)
+    # vectors = np.array(vectors)
     nbytes = vectors.nbytes
     splits = np.ceil(nbytes/1e9)
     chunks = np.array_split(vectors, splits)
@@ -117,7 +119,11 @@ def windows(chunk, queue, counter, progress):
 # multiprocessing package. 
 def chunking(data, interm_folder, window):
     index = data.index.get_level_values('position').to_numpy()
-    array = data.to_numpy()
+    np_array = data.to_numpy()
+    
+    os.makedirs(interm_folder+"/tmp/", exist_ok=True)
+    array = np.memmap(interm_folder+"/tmp/tmp.npy", dtype='float32', mode='w+', shape=np_array.shape)
+    array[:,:] = np_array[:,:]
 
     radius = int((window - 1)/2)
     # The chunk size is the number of rows assigned to each core. We never want 
@@ -132,8 +138,8 @@ def chunking(data, interm_folder, window):
         start = max(i - radius, 0)
         end = i + chunk_size + radius + 1
 
-        section = array[start:end].copy()
-        index_section = index[start:end].copy()
+        section = array[start:end]
+        index_section = index[start:end]
 
         total  += len(section) - radius - 2
 
@@ -259,6 +265,7 @@ def main():
     utils.end_time(start)
     total_time = utils.end_time(total_start, True)
     print (f'{total_time} elapsed in total.')
+    shutil.rmtree(f"{interm_folder}/tmp/")    
     
 if __name__ == '__main__':
     main()
