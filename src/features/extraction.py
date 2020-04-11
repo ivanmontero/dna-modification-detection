@@ -59,34 +59,20 @@ def setup():
 
 import numpy as np
 
+# (data, result, window, i, positions[i], counter, progress) 
 # Extract windows around each base and return a dataframe.
-def windows(chunk, queue, counter, progress):
-    data = chunk['data']
-    index = chunk['index']
-    window = chunk['window']
-    position = chunk['position']
-    folder = chunk['folder']
-
-    # Radius is half the window size rounded down. So 51 is 25. 
-    radius = int((window - 1)/2)
-
+def windows(data, result, window, indices, positions, counter, progress, queue):
     # Update progress bar after this many rows. 
     interval = 500
-    columns = data.shape[1]
-    os.makedirs(folder+"/tmp/", exist_ok=True)
-    vectors = np.memmap(folder+f"/tmp/tmp{position}.npy", dtype='float32', mode='w+', shape=(len(data),columns*window))
-    # vectors = [[0] * columns * window] * len(data)
+    invalid_indices = []
 
-    # Skip the first radius rows, and the last radius rows since we can't get
-    # full windows there anyways.
-    for i in range(radius, len(data) - radius - 1):
+    for i, start in enumerate(indices):
         # Find the window. 
-        start = i - radius
-        end = i + radius + 1
+        end = start + window
         section = data[start:end]
 
-        start_position = index[start]
-        end_position = index[end]
+        start_position = positions[i]
+        end_position = positions[i + window - 1]
 
         if i % interval == 0:
             with counter.get_lock():
@@ -96,98 +82,40 @@ def windows(chunk, queue, counter, progress):
 
         # Checks if rows are contiguous.
         if (abs(end_position - start_position) > window):
+            invalid_indices.append(start)
             continue
         
         # # Flattens the section of the table using column first Fortran method.
-        vector = section.flatten(order = 'F')
-        vectors[i] = vector
+        result[start,:] = section.reshape(-1)
 
     with counter.get_lock():
         counter.value += (i % interval)
         progress.n = counter.value
         progress.refresh()
-
-    # vectors = np.array(vectors)
-    nbytes = vectors.nbytes
-    splits = np.ceil(nbytes/1e9)
-    chunks = np.array_split(vectors, splits)
-
-    for i in range(len(chunks)):
-        queue.put((position, i, chunks[i]))
-
-# Divide the table into the number of cores available so we can use the 
-# multiprocessing package. 
-def chunking(data, interm_folder, window):
-    index = data.index.get_level_values('position').to_numpy()
-    np_array = data.to_numpy()
     
-    os.makedirs(interm_folder+"/tmp/", exist_ok=True)
-    array = np.memmap(interm_folder+"/tmp/tmp.npy", dtype='float32', mode='w+', shape=np_array.shape)
-    array[:,:] = np_array[:,:]
+    queue.put(invalid_indices)
+# (result, output, i, counter, progress, queue)
+def write_to_disk(result, output, indices, invalid_indices, out_loc, counter, progress, queue):
+    # Update progress bar after this many rows. 
+    interval = 500
 
-    radius = int((window - 1)/2)
-    # The chunk size is the number of rows assigned to each core. We never want 
-    # to have left over rows so we add one. 
-    num_processes = multiprocessing.cpu_count()
-    chunk_size = int(len(data)/num_processes) + 1
-
-    chunks = []
-    position = 0
-    total = 0
-    for i in range(0, len(data), chunk_size):
-        start = max(i - radius, 0)
-        end = i + chunk_size + radius + 1
-
-        section = array[start:end]
-        index_section = index[start:end]
-
-        total  += len(section) - radius - 2
-
-        chunks.append({
-            'data': section,
-            'index': index_section,
-            'window': window,
-            'position': position,
-            'folder': interm_folder,
-        })
-        position += 1
-
-    return chunks, total
-
-def combine(results, window):
-    combined_result = {}
-    for i in range(multiprocessing.cpu_count()):
-        combined_result[i] = []
-
-    for item in results:
-        process = item[0]
-        combined_result[process].append(item[1:])
-
-    results = []
-    for key in combined_result:
-        process = combined_result[key]
-        ordered_list = [0] * len(process)
-
-        for item in process:
-            order = item[0]
-            ordered_list[order] = item[1]
-
-        results.append(np.vstack(ordered_list))
-
-    radius = int((window - 1)/2)
-    first_result = results[0][:-(radius + 1)]
-    combined_result = [first_result]
-
-    for i in range(1, len(results) - 1):
-        trimmed_result = results[i][radius:-(radius + 1)]
-        combined_result.append(trimmed_result)
+    for i in indices:
+        if i not in invalid_indices:
+            output[out_loc[i],:] = result[i,:]
         
-    final_result = results[-1][radius:]
-    combined_result.append(final_result)
-    combined_result = np.vstack(combined_result)
-    valid = combined_result.any(axis = 1)
+        if i % interval == 0:
+            with counter.get_lock():
+                counter.value += interval
+                progress.n = counter.value
+                progress.refresh()
+
+
+    with counter.get_lock():
+        counter.value += (i % interval)
+        progress.n = counter.value
+        progress.refresh()
     
-    return combined_result
+    queue.put("done!")
 
 def main():
     total_start = utils.start_time()
@@ -204,48 +132,80 @@ def main():
     interm_folder = os.path.join(data_folder, 'interm')
     os.makedirs(interm_folder, exist_ok=True)
 
-    # Chunk the dataset into the number of processors.
-    data, total = chunking(
-        data[arguments.columns],
-        interm_folder,
-        arguments.window)
-    utils.end_time(start)
+    # Create a memmap for the data and results
+    np_array = data[arguments.columns].to_numpy()
+    os.makedirs(interm_folder+"/tmp/", exist_ok=True)
+    array = np.memmap(interm_folder+"/tmp/data.npy", dtype='float32', mode='w+', shape=np_array.shape)
+    result = np.memmap(interm_folder+"/tmp/result.npy", dtype='float32', mode='w+', shape=(np_array.shape[0]-(arguments.window-1), np_array.shape[1]*arguments.window))
+    array[:,:] = np_array[:,:]
+    positions = data.index.get_level_values('position').to_numpy()
+
+
+    # Determine chunks:
+    indices = np.array_split(np.arange(result.shape[0]), os.cpu_count())
 
     # Setup the progress bar.
-    start = utils.start_time(f'Using {len(data)} Cores')
+    start = utils.start_time(f'Using {os.cpu_count()} Cores')
     counter = multiprocessing.Value('i', 0)
     queue = multiprocessing.SimpleQueue()
-    progress = tqdm.tqdm(total = total, unit = ' rows', leave = False)
+    progress = tqdm.tqdm(total = result.shape[0], unit = ' rows', leave = False)
+
+    # with multiprocessing.Pool(os.cpu_count()) as p:
+    #     p.starmap(windows,[(data, result, arguments.window, i, positions[i], counter, progress) for i in indices])
 
     # Send off one job for each chunk.
     processes = []
-    for chunk in data:
-        process = multiprocessing.Process(target = windows, args = (chunk, queue, counter, progress))
+    for i in indices:
+        process = multiprocessing.Process(target = windows, args = (array, result, arguments.window, i, positions[i[0]:i[-1]+arguments.window], counter, progress, queue))
         process.start()
         processes.append(process)
+    # for p in processes:
+    #     p.join()
 
     # Get all the results back. 
-    results = []
+    invalid_indices = set()
     while multiprocessing.active_children():
-        results.append(queue.get())
-
+        while not queue.empty():
+            invalid_indices.update(queue.get())
     utils.end_time(start)
 
-    # Order the results so they match input order.
-    start = utils.start_time('Combining Data')
-    results = combine(results, arguments.window)
-    utils.end_time(start)
 
-    # Save the feature vectors as numpy arrays.
-    start = utils.start_time('Saving Data')
+    # Create the rsult file
+    start = utils.start_time(f'Creating final output file')
+
     processed_folder = os.path.join(data_folder, 'processed')
     os.makedirs(processed_folder, exist_ok=True)
     if arguments.prefix:
         filename = os.path.join(processed_folder, f'{arguments.prefix}_data.npy')
     else:
         filename = os.path.join(processed_folder, 'data.npy')
-    np.save(filename, results)
+    output = np.memmap(filename, dtype='float32', mode='w+', shape=(result.shape[0]-len(invalid_indices), result.shape[1]))
 
+    valid_indices = np.ones(result.shape[0])
+    valid_indices[list(invalid_indices)] = 0
+    out_loc = (np.cumsum(valid_indices) - 1).astype(int).tolist()
+
+    counter = multiprocessing.Value('i', 0)
+    queue = multiprocessing.SimpleQueue()
+    progress = tqdm.tqdm(total = result.shape[0], unit = ' rows', leave = False)
+    processes = []
+    for i in indices:
+        process = multiprocessing.Process(target = write_to_disk, args = (result, output, i, invalid_indices, out_loc, counter, progress, queue))
+        process.start()
+        processes.append(process)
+
+    # Get all the results back. 
+    results = []
+    while multiprocessing.active_children():
+        while not queue.empty():
+            results.append(queue.get())
+
+    # The two alternatives that blow up memory
+    # output[:,:] = result[np.delete(np.arange(result.shape[0]), invalid_indices),:]
+    # output[:,:] = np.delete(result, invalid_indices, axis=0)
+    utils.end_time(start)
+
+    start = utils.start_time(f'Saving metadata')
     # Save the metadata for later. 
     column_labels = []
     for column in arguments.columns:
