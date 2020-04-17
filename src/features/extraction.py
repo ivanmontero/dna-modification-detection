@@ -147,7 +147,6 @@ def main():
     array[:,:] = np_array[:,:]
     positions = data.index.get_level_values('position').to_numpy()
 
-
     # Determine chunks:
     indices = np.array_split(np.arange(output.shape[0]-(arguments.window-1)), os.cpu_count())
 
@@ -157,59 +156,18 @@ def main():
     queue = multiprocessing.SimpleQueue()
     progress = tqdm.tqdm(total = output.shape[0], unit = ' rows', leave = False)
 
-    # with multiprocessing.Pool(os.cpu_count()) as p:
-    #     p.starmap(windows,[(data, result, arguments.window, i, positions[i], counter, progress) for i in indices])
-
     # Send off one job for each chunk.
     processes = []
     for i in indices:
         process = multiprocessing.Process(target = windows, args = (array, output, arguments.window, i, positions[i[0]:i[-1]+arguments.window], counter, progress, queue))
         process.start()
         processes.append(process)
-    # for p in processes:
-    #     p.join()
 
     # Get all the results back. 
     invalid_indices = set()
     while multiprocessing.active_children():
         while not queue.empty():
             invalid_indices.update(queue.get())
-    utils.end_time(start)
-
-
-    # Create the rsult file
-    # start = utils.start_time(f'Creating final output file')
-
-    # processed_folder = os.path.join(data_folder, 'processed')
-    # os.makedirs(processed_folder, exist_ok=True)
-    # if arguments.prefix:
-    #     filename = os.path.join(processed_folder, f'{arguments.prefix}_data.npy')
-    # else:
-    #     filename = os.path.join(processed_folder, 'data.npy')
-    # output = np.memmap(filename, dtype='float32', mode='w+', shape=(result.shape[0]-len(invalid_indices), result.shape[1]))
-
-    # valid_indices = np.ones(result.shape[0])
-    # valid_indices[list(invalid_indices)] = 0
-    # out_loc = (np.cumsum(valid_indices) - 1).astype(int).tolist()
-
-    # counter = multiprocessing.Value('i', 0)
-    # queue = multiprocessing.SimpleQueue()
-    # progress = tqdm.tqdm(total = result.shape[0], unit = ' rows', leave = False)
-    # processes = []
-    # for i in indices:
-    #     process = multiprocessing.Process(target = write_to_disk, args = (result, output, i, invalid_indices, out_loc, counter, progress, queue))
-    #     process.start()
-    #     processes.append(process)
-
-    # # Get all the results back. 
-    # results = []
-    # while multiprocessing.active_children():
-    #     while not queue.empty():
-    #         results.append(queue.get())
-
-    # The two alternatives that blow up memory
-    # output[:,:] = result[np.delete(np.arange(result.shape[0]), invalid_indices),:]
-    # output[:,:] = np.delete(result, invalid_indices, axis=0)
     utils.end_time(start)
 
     start = utils.start_time(f'Saving metadata')
