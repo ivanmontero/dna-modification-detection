@@ -126,10 +126,16 @@ def plot_curve(ax, x_values, y_values, area, color, label):
     # Calculate the Means and Standard Deviations
     if not area: 
         mean_x, mean_y, lower_y, upper_y = interpolate_curve(x_values, y_values)
+        print (f'{label}, {mean_y[-1]}')
+
         label = f'{label}'
     else:
         mean_x, mean_y, lower_y, upper_y, mean_area, std_area = interpolate_curve(x_values, y_values, area)
+        print (f'{label}, {mean_area}, {std_area}')
+
         label = f'{label}\n' + rf'(AUC = {mean_area:.2f} $\pm$ {std_area:.2f})'
+
+        
 
     # Plot the Average Across Folds
     ax.plot(

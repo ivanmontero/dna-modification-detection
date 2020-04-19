@@ -776,8 +776,8 @@ def main():
     project_folder = utils.project_path(arguments.outdir)
     reports_folder = os.path.join(project_folder, 'reports')
     training_folder = os.path.join(reports_folder, 'training')
-    os.makedirs(reports_folder, exist_ok=True)
-    os.makedirs(training_folder, exist_ok=True)
+    os.makedirs(reports_folder, exist_ok = True)
+    os.makedirs(training_folder, exist_ok = True)
     # Create filename.
     if arguments.prefix:
         filename = os.path.join(training_folder, f'{arguments.prefix}_model_performance.pdf')
@@ -788,7 +788,7 @@ def main():
     if not arguments.skip_final:
         start = utils.start_time('Training Final Model')
         models_folder = os.path.join(project_folder, 'models')
-        os.makedirs(models_folder, exist_ok=True)
+        os.makedirs(models_folder, exist_ok = True)
         if arguments.prefix:
             filename = os.path.join(models_folder, f'{arguments.prefix}_model.h5')
         else:
