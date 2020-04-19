@@ -749,9 +749,12 @@ def main():
     # Reading data. 
     start = utils.start_time('Reading Data')
     dataframe = pd.read_hdf(arguments.dataframe)
-    vectors = np.load(arguments.input)
     with open(arguments.metadata) as infile:
         metadata = json.load(infile)
+    # vectors = np.load(arguments.input)
+    print(len(metadata["columns"]))
+    vectors = np.memmap(arguments.input, dtype='float32', mode='r', shape=(metadata["rows"], len(metadata["columns"])))
+    print(vectors.shape)
     utils.end_time(start) 
 
     # Training model.
