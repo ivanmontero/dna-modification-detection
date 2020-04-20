@@ -3,12 +3,17 @@ from matplotlib import pyplot as plt
 import numpy as np
 
 # Plot a multipage PDF with various metrics.
-def plot_pdf(results, filename):
+def plot_pdf(results, filename, description):
     history = results['history']
     receiver_operator = results['receiver_operator']
     precision_recall = results['precision_recall']
     peak_curve = results['peak_curve']
     peak_baseline = results['peak_baseline']
+
+    if description:
+        metrics = []
+    else:
+        metrics = False
 
     with PdfPages(filename) as pdf:
         # Plot training and validation history.
@@ -21,7 +26,8 @@ def plot_pdf(results, filename):
             x_label = 'Epoch',
             y_label = 'Accuracy',
             paired_colors = True,
-            skip_area = True)
+            skip_area = True,
+            metrics = metrics)
         pdf.savefig(figure)
         plt.close()
 
@@ -33,7 +39,8 @@ def plot_pdf(results, filename):
             values = receiver_operator,
             title = 'ROC Curve',
             x_label = 'False Positive Rate',
-            y_label = 'True Positive Rate')
+            y_label = 'True Positive Rate',
+            metrics = metrics)
         # Plot baseline.
         ax.plot(
             [0,1],
@@ -51,7 +58,8 @@ def plot_pdf(results, filename):
             values = precision_recall,
             title = 'PR Curve',
             x_label = 'Recall',
-            y_label = 'Precision')
+            y_label = 'Precision',
+            metrics = metrics)
         # Plot baseline.
         ax.plot(
             [0, 1], 
@@ -69,7 +77,8 @@ def plot_pdf(results, filename):
             values = peak_curve,
             title = 'Peak Recall',
             x_label = '% Peaks with J',
-            y_label = '% Js in Peak')
+            y_label = '% Js in Peak',
+            metrics = metrics)
         # Plot baseline.
         ax.plot(
             [0, 1], 
@@ -79,8 +88,10 @@ def plot_pdf(results, filename):
         pdf.savefig(figure)
         plt.close()
 
+    return metrics
+
 # Plot a page with all the different baselines.
-def plot_page(figure, ax, values, title, x_label, y_label, paired_colors = False, skip_area = False):
+def plot_page(figure, ax, values, title, x_label, y_label, paired_colors = False, skip_area = False, metrics = False):
     # Pair the colors for training vs validation so it's easier to interpret.
     if paired_colors:
         colors = plt.cm.tab20(range(20))
@@ -101,7 +112,7 @@ def plot_page(figure, ax, values, title, x_label, y_label, paired_colors = False
         color = colors[i]
         label = curve['label']
 
-        plot_curve(ax, x, y, area, color, label)
+        plot_curve(ax, x, y, area, color, label, metrics)
 
     ax.set_title(title)
     ax.set_xlabel(x_label)
@@ -110,7 +121,7 @@ def plot_page(figure, ax, values, title, x_label, y_label, paired_colors = False
     figure.tight_layout()
 
 # Plot the folds and average values.
-def plot_curve(ax, x_values, y_values, area, color, label):
+def plot_curve(ax, x_values, y_values, area, color, label, metrics):
     # # Plot Individual Folds.
     # for i in range(len(x_values)):
     #     x = x_values[i]
@@ -126,16 +137,22 @@ def plot_curve(ax, x_values, y_values, area, color, label):
     # Calculate the Means and Standard Deviations
     if not area: 
         mean_x, mean_y, lower_y, upper_y = interpolate_curve(x_values, y_values)
-        print (f'{label}, {mean_y[-1]}')
+
+        if metrics:
+            print (f'{label}')
+            metrics.append(mean_y[-1])
+            metrics.append(upper_y[-1] - mean_y[-1])
 
         label = f'{label}'
     else:
         mean_x, mean_y, lower_y, upper_y, mean_area, std_area = interpolate_curve(x_values, y_values, area)
-        print (f'{label}, {mean_area}, {std_area}')
+        
+        if metrics:
+            print (f'{label}')
+            metrics.append(mean_area)
+            metrics.append(std_area)
 
         label = f'{label}\n' + rf'(AUC = {mean_area:.2f} $\pm$ {std_area:.2f})'
-
-        
 
     # Plot the Average Across Folds
     ax.plot(

@@ -134,6 +134,12 @@ def setup():
         action = 'store_true',
         help = argparse.SUPPRESS)
 
+    # Save a description during hyperparameter search.
+    parser.add_argument(
+        '--description',
+        default = False,
+        help = argparse.SUPPRESS)
+
     return parser.parse_args()
 
 # Determines how many unique peaks that exist with at least min_peak_length length. A "peak"
@@ -786,7 +792,7 @@ def main():
         filename = os.path.join(training_folder, f'{arguments.prefix}_model_performance.pdf')
     else:
         filename = os.path.join(training_folder, 'model_performance.pdf')
-    plot_metrics.plot_pdf(results, filename)
+    metrics = plot_metrics.plot_pdf(results, filename, arguments.description)
 
     if not arguments.skip_final:
         start = utils.start_time('Training Final Model')

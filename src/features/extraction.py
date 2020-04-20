@@ -1,10 +1,11 @@
 import multiprocessing
 import pandas as pd
+import numpy as np
 import argparse
-import time
+import shutil
 import json
 import tqdm
-import shutil
+
 # Add Helper Functions
 import sys
 import os
@@ -57,65 +58,42 @@ def setup():
     
     return parser.parse_args()
 
-import numpy as np
-
-# (data, result, window, i, positions[i], counter, progress) 
 # Extract windows around each base and return a dataframe.
-def windows(data, result, window, indices, positions, counter, progress, queue):
+def windows(data, output, index, positions, window, counter, progress):
     # Update progress bar after this many rows. 
     interval = 500
-    invalid_indices = []
 
-    for i, start in enumerate(indices):
-        # Find the window. 
+    n = 0
+    for start in index:
+        n += 1
+
+        # Find the window.
+        center = start + window//2
         end = start + window
         section = data[start:end]
 
-        start_position = positions[i]
-        end_position = positions[i + window - 1]
-
-        if i % interval == 0:
-            with counter.get_lock():
-                counter.value += interval
-                progress.n = counter.value
-                progress.refresh()
+        start_position = positions[start]
+        end_position = positions[end]
 
         # Checks if rows are contiguous.
         if (abs(end_position - start_position) > window):
-            invalid_indices.append(start)
-            continue
+            section = np.zeros(section.shape[1] * window)
+        else:
+            section = section.flatten(order = 'F')
         
-        # # Flattens the section of the table using column first Fortran method.
-        result[start + (window)//2,:] = section.reshape(-1)
+        # Flattens the section of the table using column first Fortran method.
+        output[center] = section
 
-    with counter.get_lock():
-        counter.value += (i % interval)
-        progress.n = counter.value
-        progress.refresh()
-    
-    queue.put(invalid_indices)
-# (result, output, i, counter, progress, queue)
-def write_to_disk(result, output, indices, invalid_indices, out_loc, counter, progress, queue):
-    # Update progress bar after this many rows. 
-    interval = 500
-
-    for i in indices:
-        if i not in invalid_indices:
-            output[out_loc[i],:] = result[i,:]
-        
-        if i % interval == 0:
+        if n % interval == 0:
             with counter.get_lock():
                 counter.value += interval
                 progress.n = counter.value
                 progress.refresh()
 
-
     with counter.get_lock():
-        counter.value += (i % interval)
+        counter.value += (n % interval)
         progress.n = counter.value
         progress.refresh()
-    
-    queue.put("done!")
 
 def main():
     total_start = utils.start_time()
@@ -130,44 +108,60 @@ def main():
     project_folder = utils.project_path(arguments.outdir)
     data_folder = os.path.join(project_folder, 'data')
     interm_folder = os.path.join(data_folder, 'interm')
-    os.makedirs(interm_folder, exist_ok=True)
+    os.makedirs(interm_folder, exist_ok = True)
 
-    # Create a memmap for the data and results
     processed_folder = os.path.join(data_folder, 'processed')
-    os.makedirs(processed_folder, exist_ok=True)
+    os.makedirs(processed_folder, exist_ok = True)
     if arguments.prefix:
-        filename = os.path.join(processed_folder, f'{arguments.prefix}_data.npy')
+        filename = os.path.join(
+            processed_folder,
+            f'{arguments.prefix}_data.npy')
     else:
-        filename = os.path.join(processed_folder, 'data.npy')
+        filename = os.path.join(
+            processed_folder, 
+            'data.npy')
     
-    np_array = data[arguments.columns].to_numpy()
-    os.makedirs(interm_folder+"/tmp/", exist_ok=True)
-    array = np.memmap(interm_folder+"/tmp/data.npy", dtype='float32', mode='w+', shape=np_array.shape)
-    output = np.memmap(filename, dtype='float32', mode='w+', shape=(np_array.shape[0], np_array.shape[1]*arguments.window))
-    array[:,:] = np_array[:,:]
+    # Get the columns needed for extraction.
     positions = data.index.get_level_values('position').to_numpy()
+    data = data[arguments.columns].to_numpy()
+    rows, cols = data.shape
+    radius = arguments.window//2
 
-    # Determine chunks:
-    indices = np.array_split(np.arange(output.shape[0]-(arguments.window-1)), os.cpu_count())
+    # Create a memmap for the data and results.
+    temp_filename = os.path.join(interm_folder, 'data.npy')
+    array = np.memmap(
+        filename = temp_filename,
+        dtype = 'float32',
+        mode = 'w+',
+        shape = data.shape)
+    output = np.memmap(filename = filename,
+        dtype = 'float32',
+        mode = 'w+',
+        shape = (rows, cols * arguments.window))
+    array[:,:] = data[:,:]
+    output[:radius,:] = 0
+    output[-(radius+1):,:] = 0
+
+    # Determine chunk indices.
+    indices = np.array_split(
+        np.arange(rows - arguments.window),
+        os.cpu_count())
 
     # Setup the progress bar.
     start = utils.start_time(f'Using {os.cpu_count()} Cores')
     counter = multiprocessing.Value('i', 0)
-    queue = multiprocessing.SimpleQueue()
-    progress = tqdm.tqdm(total = output.shape[0], unit = ' rows', leave = False)
+    progress = tqdm.tqdm(total = rows - arguments.window, unit = ' rows', leave = False)
 
     # Send off one job for each chunk.
     processes = []
-    for i in indices:
-        process = multiprocessing.Process(target = windows, args = (array, output, arguments.window, i, positions[i[0]:i[-1]+arguments.window], counter, progress, queue))
+    for index in indices:
+        process = multiprocessing.Process(target = windows, args = (array, output, index, positions, arguments.window, counter, progress))
         process.start()
         processes.append(process)
 
-    # Get all the results back. 
-    invalid_indices = set()
-    while multiprocessing.active_children():
-        while not queue.empty():
-            invalid_indices.update(queue.get())
+    # Wait till all the processes are finished. 
+    for process in processes:
+        process.join()
     utils.end_time(start)
 
     start = utils.start_time(f'Saving metadata')
@@ -176,9 +170,10 @@ def main():
     for column in arguments.columns:
         column_labels += [column] * arguments.window
 
-    metadata = {'columns': column_labels,
-                'rows': output.shape[0],
-            'arguments': vars(arguments)}
+    metadata = {
+        'columns': column_labels,
+        'rows': output.shape[0],
+        'arguments': vars(arguments)}
 
     if arguments.prefix:
         filename = os.path.join(processed_folder, f'{arguments.prefix}_metadata.json')
@@ -191,7 +186,14 @@ def main():
     utils.end_time(start)
     total_time = utils.end_time(total_start, True)
     print (f'{total_time} elapsed in total.')
-    shutil.rmtree(f"{interm_folder}/tmp/")    
+
+    for i in range(100):
+        print (output[-i])
+
+    # Clean up temporary directory.
+    del array
+    del output
+    os.remove(temp_filename)
     
 if __name__ == '__main__':
     main()
