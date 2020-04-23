@@ -5,12 +5,11 @@ import tensorflow as tf
 import pandas as pd
 import numpy as np
 import argparse
-
-pd.set_option('mode.chained_assignment', 'raise')
+import json
 
 # Import local helper functions.
-import os
 import sys
+import os
 current_path = os.path.dirname(__file__)
 utils_path = os.path.join(current_path, '..', 'utils')
 sys.path.append(utils_path)
@@ -38,9 +37,15 @@ def setup():
         '--dataframe', 
         required = True,
         help = 'Input pandas dataframe.')
+
+    parser.add_argument(
+        '-m', 
+        '--metadata',
+        required = True,
+        help = 'Metadata for input table.')
     
     parser.add_argument(
-        '-m',
+        '-md',
         '--model',
         required = True,
         help = 'The file containing the model.')
@@ -71,6 +76,12 @@ def setup():
         '--progress-off',
         default = False,
         action = 'store_true',
+        help = argparse.SUPPRESS)
+
+    # Save a description during hyperparameter search.
+    parser.add_argument(
+        '--description',
+        default = False,
         help = argparse.SUPPRESS)
 
     return parser.parse_args()
@@ -237,6 +248,7 @@ def plot_locations(model, vectors, dataframe, locations, filename, progress_off)
     index = dataframe.index.get_level_values('chromosome')
     position = dataframe.index.get_level_values('position')
 
+    j_count = []
     with PdfPages(filename) as pdf:
         for location in locations:
             split = location.split(':')
@@ -262,7 +274,13 @@ def plot_locations(model, vectors, dataframe, locations, filename, progress_off)
             current_scores[condition] = scores
             current_dataframe = current_dataframe.assign(score = current_scores)
 
+            # Plot data.
             plot(current_dataframe, chromosome, start, end, pdf)
+
+            # Count number of Js called. 
+            j_count.append(np.sum(scores > 0.9))
+
+    return j_count
 
 def main():
     # Get argparse arguments. 
@@ -275,7 +293,9 @@ def main():
     # Reading data. 
     start = utils.start_time('Reading Data')
     dataframe = pd.read_hdf(arguments.dataframe)
-    vectors = np.load(arguments.input)
+    with open(arguments.metadata) as infile:
+        metadata = json.load(infile)
+    vectors = np.memmap(arguments.input, dtype = 'float32', mode = 'r', shape = (metadata['rows'], len(metadata['columns'])))
     utils.end_time(start) 
 
     # Load model. 
@@ -292,13 +312,21 @@ def main():
         filename = os.path.join(predict_folder, 'predict.pdf')
 
     # Plot locations.
-    plot_locations(
+    j_count = plot_locations(
         model = model,
         vectors = vectors,
         dataframe = dataframe,
         locations = arguments.location,
         filename = filename, 
         progress_off = arguments.progress_off)
+
+    if arguments.description:
+        line = f'{j_count[0]}\t{j_count[1]}\n'
+
+        hyperparameter_folder = os.path.join(reports_folder, 'hyperparameter')
+        metrics_file = os.path.join(hyperparameter_folder, 'metrics.txt')
+        with open(metrics_file, 'a+') as outfile:
+            outfile.write(line)
 
 if __name__ == '__main__':
     main()

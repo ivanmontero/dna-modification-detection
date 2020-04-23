@@ -187,9 +187,6 @@ def main():
     total_time = utils.end_time(total_start, True)
     print (f'{total_time} elapsed in total.')
 
-    for i in range(100):
-        print (output[-i])
-
     # Clean up temporary directory.
     del array
     del output

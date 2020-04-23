@@ -7,6 +7,7 @@ def import_modules():
         
     global progress_bars
     global plot_metrics
+    global datetime
     global metrics
     global utils
     global keras
@@ -19,8 +20,8 @@ def import_modules():
     global os
 
     # Import Local Helper Functions
-    import os
     import sys
+    import os
     current_path = os.path.dirname(__file__)
     utils_path = os.path.join(current_path, '..', 'utils')
     sys.path.append(utils_path)
@@ -37,6 +38,7 @@ def import_modules():
     import tensorflow as tf
     import pandas as pd
     import numpy as np
+    import datetime
     import json
     import copy
     utils.end_time(start)
@@ -138,6 +140,21 @@ def setup():
     parser.add_argument(
         '--description',
         default = False,
+        help = argparse.SUPPRESS)
+
+    # Number of neurons per layer. 
+    parser.add_argument(
+        '--layers',
+        nargs = '+',
+        type = int,
+        default = [300, 150, 50],
+        help = argparse.SUPPRESS)
+
+    # Dropout rate. 
+    parser.add_argument(
+        '--dropout',
+        default = 0.5,
+        type = float,
         help = argparse.SUPPRESS)
 
     return parser.parse_args()
@@ -310,15 +327,24 @@ def sample(vectors, n_examples):
 
 # We will define our model as a multi-layer densely connected neural network
 # with dropout between the layers.
-# TODO: Parameterize this
-def create_model(input_dim):
+def create_model(input_dim, layers, dropout):
     model = keras.Sequential()
-    model.add(keras.layers.Dense(300, input_dim = input_dim, activation='relu'))
-    model.add(keras.layers.Dropout(0.5))
-    model.add(keras.layers.Dense(150, activation='relu'))
-    model.add(keras.layers.Dropout(0.5))
-    model.add(keras.layers.Dense(50, activation='relu'))
-    model.add(keras.layers.Dense(1, activation='sigmoid'))
+
+    # For only a linear model. 
+    if layers[0] == 0:
+         model.add(keras.layers.Dense(1, input_dim = input_dim, activation = 'sigmoid'))
+    
+    else:
+        model.add(keras.layers.Dense(layers[0], input_dim = input_dim, activation = 'relu'))
+
+        # If there is more than one layer. 
+        if len(layers) > 1:
+            for neurons in layers[1:]:    
+                model.add(keras.layers.Dropout(dropout))
+                model.add(keras.layers.Dense(neurons, activation = 'relu'))
+
+        model.add(keras.layers.Dense(1, activation = 'sigmoid'))
+
     model.compile(
         optimizer='adam', 
         loss='binary_crossentropy', 
@@ -330,10 +356,10 @@ def create_model(input_dim):
 # window classification. Goes to each base in the window, and runs the classifier
 # with each changed to a different base. Returns the additive probability drop on
 # each base.
-def feature_importance(model, vectors, scores, metadata, progress_off, batch_size = 32):
-    arguments = metadata["arguments"]
-    window_size = arguments["window"]
-    columns = arguments["columns"]
+def feature_importance(model, vectors, scores, metadata, progress_off, layers, dropout, batch_size = 32):
+    arguments = metadata['arguments']
+    window_size = arguments['window']
+    columns = arguments['columns']
     center = window_size // 2
     length = len(vectors)
 
@@ -379,7 +405,7 @@ def feature_importance(model, vectors, scores, metadata, progress_off, batch_siz
     return drops
 
 # Trains a odel on the entire passed in dataframe.
-def train_final(vectors, dataframe, n_examples, metadata, only_t, train_all, progress_off):
+def train_final(vectors, dataframe, n_examples, metadata, only_t, train_all, progress_off, layers, dropout):
     labels = dataframe['label'].to_numpy()
 
     # Only keep Ts.
@@ -402,7 +428,7 @@ def train_final(vectors, dataframe, n_examples, metadata, only_t, train_all, pro
         callback = progress_bars.train_progress(length)
 
     window = len(metadata['columns'])
-    model = create_model(window)
+    model = create_model(window, layers, dropout)
     history = model.fit(
         dataset,
         epochs = 10,
@@ -522,7 +548,7 @@ def validate_fold(model, vectors, dataframe, progress_off):
 # Performs a k-fold experiment on the dataset, where k is equal to the number of chromosomes. On each fold, this method
 # obtains metrics by training on all examples from all chromosomes except a holdout one, then obtains metrics on the one
 # held out chromosome.
-def train_dataset(vectors, dataframe, threshold, n_examples, holdout, metadata, min_peak_length, train_all, progress_off):
+def train_dataset(vectors, dataframe, threshold, n_examples, holdout, metadata, min_peak_length, train_all, progress_off, layers, dropout):
     # Drop rows where there are any nulls.
     condition = vectors.any(axis = 1)
     vectors = vectors[condition]
@@ -564,7 +590,7 @@ def train_dataset(vectors, dataframe, threshold, n_examples, holdout, metadata, 
     }
 
     window = len(metadata['columns'])
-    model = create_model(window)
+    model = create_model(window, layers, dropout)
     index = dataframe.index.get_level_values('chromosome')
     for holdout in chromosomes:
         # Training fold.
@@ -629,7 +655,9 @@ def train_dataset(vectors, dataframe, threshold, n_examples, holdout, metadata, 
             vectors = validation_vectors,
             scores = scores,
             metadata = metadata,
-            progress_off = progress_off)
+            progress_off = progress_off,
+            layers = layers,
+            dropout = dropout)
 
         # Store metrics.
         roc, pr, peak = get_metrics(validation_dataframe, scores)
@@ -757,14 +785,11 @@ def main():
     dataframe = pd.read_hdf(arguments.dataframe)
     with open(arguments.metadata) as infile:
         metadata = json.load(infile)
-    # vectors = np.load(arguments.input)
-    print(len(metadata["columns"]))
-    vectors = np.memmap(arguments.input, dtype='float32', mode='r', shape=(metadata["rows"], len(metadata["columns"])))
-    print(vectors.shape)
+    vectors = np.memmap(arguments.input, dtype = 'float32', mode = 'r', shape = (metadata['rows'], len(metadata['columns'])))
     utils.end_time(start) 
 
     # Training model.
-    print("Training Model")
+    print('Training Model')
     start = utils.start_time()
     vectors, dataframe, results = train_dataset(
         vectors = vectors,
@@ -775,7 +800,9 @@ def main():
         metadata = metadata,
         min_peak_length = arguments.min_peak_length,
         train_all = arguments.train_all,
-        progress_off = arguments.progress_off)
+        progress_off = arguments.progress_off, 
+        layers = arguments.layers,
+        dropout = arguments.dropout)
     utils.end_time(start) 
 
     results = order_results(results)
@@ -792,7 +819,25 @@ def main():
         filename = os.path.join(training_folder, f'{arguments.prefix}_model_performance.pdf')
     else:
         filename = os.path.join(training_folder, 'model_performance.pdf')
+
     metrics = plot_metrics.plot_pdf(results, filename, arguments.description)
+    if arguments.description:
+        model = create_model(len(metadata['columns']), arguments.layers, arguments.dropout)
+        parameters = model.count_params()
+
+        date = datetime.date.today()
+        time = datetime.datetime.now().time()
+
+        string = ''
+        for item in metrics:
+            string += f'\t{item}'
+
+        line = f'{date}\t{time}\t{arguments.description}\t{vars(arguments)}{string}\t{parameters}\t'
+
+        hyperparameter_folder = os.path.join(reports_folder, 'hyperparameter')
+        metrics_file = os.path.join(hyperparameter_folder, 'metrics.txt')
+        with open(metrics_file, 'a+') as outfile:
+            outfile.write(line)
 
     if not arguments.skip_final:
         start = utils.start_time('Training Final Model')
@@ -810,7 +855,9 @@ def main():
             metadata = metadata, 
             only_t = arguments.only_t,
             train_all = arguments.train_all,
-            progress_off = arguments.progress_off)
+            progress_off = arguments.progress_off, 
+            layers = arguments.layers,
+            dropout = arguments.dropout)
 
         model.save(filename)
         utils.end_time(start)

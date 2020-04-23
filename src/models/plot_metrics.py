@@ -138,8 +138,7 @@ def plot_curve(ax, x_values, y_values, area, color, label, metrics):
     if not area: 
         mean_x, mean_y, lower_y, upper_y = interpolate_curve(x_values, y_values)
 
-        if metrics:
-            print (f'{label}')
+        if type(metrics) is list:
             metrics.append(mean_y[-1])
             metrics.append(upper_y[-1] - mean_y[-1])
 
@@ -147,8 +146,7 @@ def plot_curve(ax, x_values, y_values, area, color, label, metrics):
     else:
         mean_x, mean_y, lower_y, upper_y, mean_area, std_area = interpolate_curve(x_values, y_values, area)
         
-        if metrics:
-            print (f'{label}')
+        if type(metrics) is list:
             metrics.append(mean_area)
             metrics.append(std_area)
 
