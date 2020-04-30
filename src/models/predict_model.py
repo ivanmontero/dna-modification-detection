@@ -1,11 +1,10 @@
 from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib import pyplot as plt
-from tensorflow import keras
-import tensorflow as tf
 import pandas as pd
 import numpy as np
 import argparse
 import json
+import torch
 
 # Import local helper functions.
 import sys
@@ -53,7 +52,7 @@ def setup():
     parser.add_argument(
         '-l',
         '--location',
-        required = True,
+        required = False,
         nargs = '+',
         help = 'Which locations to visualize.\n\
                 In the format chromosome:start:end.\n \
@@ -86,25 +85,23 @@ def setup():
 
     return parser.parse_args()
 
-def predict(model, vectors, progress_off, batch_size = 32):
-    # Convert to tensorflow dataset.
-    dataset = tf.data.Dataset.from_tensor_slices(vectors)
-    dataset = dataset.batch(batch_size)
+def predict(model, vectors, progress_off, batch_size=32):
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-    # Compute the number of batches.
-    length = int(np.ceil(len(vectors)/batch_size))
+    n = vectors.shape[0]
+    # dataset = torch.utils.data.TensorDataset(torch.tensor(vectors))
+    dataloader = torch.utils.data.DataLoader(torch.tensor(vectors), batch_size=batch_size)
 
-    # Create our custom TQDM progress bar for validation.
-    if progress_off:
-        callback = progress_bars.no_progress()
-    else:
-        callback = progress_bars.predict_progress(length)
+    predictions = []
+    with torch.no_grad():
+        for bx in dataloader:
+            bx = bx.to(device).float()
+
+            output = model(bx)
+            predictions.append(output)
     
-    scores = model.predict(
-        dataset,
-        callbacks = [callback])
+    return torch.cat(predictions, dim=0).cpu().numpy()
 
-    return scores.reshape(-1)
 
 def get_sequence(dataframe):
     top_encoding = dataframe[[
@@ -299,7 +296,8 @@ def main():
     utils.end_time(start) 
 
     # Load model. 
-    model = keras.models.load_model(arguments.model)
+    # model = keras.models.load_model(arguments.model)
+    model = torch.load(arguments.model)
 
     # Determine filename.
     project_folder = utils.project_path(arguments.outdir)
@@ -311,7 +309,6 @@ def main():
     else:
         filename = os.path.join(predict_folder, 'predict.pdf')
 
-    # Plot locations.
     j_count = plot_locations(
         model = model,
         vectors = vectors,

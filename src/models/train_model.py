@@ -6,22 +6,24 @@ def import_modules():
     # Make the local imports global
         
     global progress_bars
+    global tqdm
     global plot_metrics
     global datetime
     global metrics
     global utils
-    global keras
     global copy 
     global json
     global sys
-    global tf
+    global torch
+    global nn
+    global F
     global pd
     global np
     global os
 
     # Import Local Helper Functions
-    import sys
     import os
+    import sys
     current_path = os.path.dirname(__file__)
     utils_path = os.path.join(current_path, '..', 'utils')
     sys.path.append(utils_path)
@@ -33,14 +35,16 @@ def import_modules():
     import plot_metrics
 
     # Import Everything Else
-    from tensorflow import keras
     from sklearn import metrics
-    import tensorflow as tf
+    import torch
+    import torch.nn as nn
+    import torch.nn.functional as F
     import pandas as pd
     import numpy as np
     import datetime
     import json
     import copy
+    from tqdm import tqdm
     utils.end_time(start)
 
 # Return argparse arguments. 
@@ -327,39 +331,108 @@ def sample(vectors, n_examples):
 
 # We will define our model as a multi-layer densely connected neural network
 # with dropout between the layers.
-def create_model(input_dim, layers, dropout):
-    model = keras.Sequential()
+# TODO: Parameterize this
+def create_model(input_dim, hidden_dims, dropout=0.5):
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-    # For only a linear model. 
-    if layers[0] == 0:
-         model.add(keras.layers.Dense(1, input_dim = input_dim, activation = 'sigmoid'))
+    layers = []
+    prev_dim = input_dim
+    for h in hidden_dims:
+        layers.append(nn.Linear(prev_dim, h))
+        layers.append(nn.ReLU())
+        layers.append(nn.Dropout(dropout))
+        prev_dim = h
+    layers.append(nn.Linear(prev_dim, 1))
+    layers.append(nn.Sigmoid())
+
+    return nn.Sequential(*layers).to(device)
+
+def fit(model, vectors, labels, epochs=10, batch_size=32, valid_vectors=None, valid_labels=None):  # TODO: Return history
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    opt = torch.optim.Adam(model.parameters())
+
+    n = vectors.shape[0]
+    dataset = torch.utils.data.TensorDataset(torch.tensor(vectors), torch.tensor(labels))
+    dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True)
+
+    history = {stat: [] for stat in ["loss", "acc", "val_loss", "val_acc"]}
+
+    for epoch in tqdm(range(epochs), desc="Training", position=0):
+        correct = 0
+        cum_loss = 0.0
+
+        # Train a single epoch
+        for bx, by in tqdm(dataloader, desc="Train Batch", position=1, leave=False):
+            bx = bx.to(device).float()
+            by = by.to(device).float()
+
+            output = model(bx)
+            loss = F.binary_cross_entropy(output.reshape(-1), by)
+
+            opt.zero_grad()
+            loss.backward()
+            opt.step()
+
+            correct += ((output.reshape(-1) > 0.5).int() == by).float().sum().cpu().item()
+            cum_loss += loss.cpu().item()
+
+        history["loss"].append(cum_loss / n)
+        history["acc"].append(correct / n)
+
+        if valid_vectors is not None:
+            val_loss, val_acc = validate(model, valid_vectors, valid_labels, batch_size)
+            history["val_loss"].append(val_loss)
+            history["val_acc"].append(val_acc)
+
+    return history
+
+def validate(model, vectors, labels, batch_size=32):
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+    n = vectors.shape[0]
+    dataset = torch.utils.data.TensorDataset(torch.tensor(vectors), torch.tensor(labels))
+    dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size)
+
+    correct = 0
+    cum_loss = 0.0
+    with torch.no_grad():
+        for bx, by in tqdm(dataloader, desc="Validation Batch", position=1, leave=False):
+            bx = bx.to(device).float()
+            by = by.to(device).float()
+
+            output = model(bx)
+            loss = F.binary_cross_entropy(output.reshape(-1), by)
+
+            cum_loss += loss.cpu().item()
+            correct += ((output.reshape(-1) > 0.5).int() == by).float().sum().cpu().item()
     
-    else:
-        model.add(keras.layers.Dense(layers[0], input_dim = input_dim, activation = 'relu'))
+    return cum_loss / n, correct / n
 
-        # If there is more than one layer. 
-        if len(layers) > 1:
-            for neurons in layers[1:]:    
-                model.add(keras.layers.Dropout(dropout))
-                model.add(keras.layers.Dense(neurons, activation = 'relu'))
+def predict(model, vectors, batch_size=32):
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-        model.add(keras.layers.Dense(1, activation = 'sigmoid'))
+    n = vectors.shape[0]
+    # dataset = torch.utils.data.TensorDataset(torch.tensor(vectors))
+    dataloader = torch.utils.data.DataLoader(torch.tensor(vectors), batch_size=batch_size)
 
-    model.compile(
-        optimizer='adam', 
-        loss='binary_crossentropy', 
-        metrics = ['accuracy'])
+    predictions = []
+    with torch.no_grad():
+        for bx in dataloader:
+            bx = bx.to(device).float()
 
-    return model
+            output = model(bx)
+            predictions.append(output)
+    
+    return torch.cat(predictions, dim=0).cpu().numpy()
 
 # Determines the most important bases in determining the model's confidence in the
 # window classification. Goes to each base in the window, and runs the classifier
 # with each changed to a different base. Returns the additive probability drop on
 # each base.
-def feature_importance(model, vectors, scores, metadata, progress_off, layers, dropout, batch_size = 32):
-    arguments = metadata['arguments']
-    window_size = arguments['window']
-    columns = arguments['columns']
+def feature_importance(model, vectors, scores, metadata, progress_off, batch_size = 32):
+    arguments = metadata["arguments"]
+    window_size = arguments["window"]
+    columns = arguments["columns"]
     center = window_size // 2
     length = len(vectors)
 
@@ -385,18 +458,11 @@ def feature_importance(model, vectors, scores, metadata, progress_off, layers, d
         current[:,center_indexing] = np.roll(to_rotate, i+1, axis = 1)
         alternate_vectors[i*length:(i+1)*length,:] = current.copy()
 
-    # Convert to tensorflow dataset.
-    dataset = tf.data.Dataset.from_tensor_slices(alternate_vectors)
-    dataset = dataset.batch(batch_size)
-
-    # Compute the number of batches.
-    length = int(np.ceil(len(alternate_vectors)/batch_size))
-
     new_predictions = validate_network(
-        model = model, 
-        dataset = dataset,
-        length = length, 
-        progress_off = progress_off)
+        model,
+        alternate_vectors,
+        progress_off
+    )
 
     # Get the aggregate new prediction and find the delta. 
     new_predictions = new_predictions.reshape(3,-1)
@@ -415,25 +481,16 @@ def train_final(vectors, dataframe, n_examples, metadata, only_t, train_all, pro
         labels = labels[condition]
 
     # Create the dataset. 
-    dataset, length = create_training_fold(
+    vectors, labels = create_training_fold(
         vectors = vectors,
         labels = labels,
         n_examples = n_examples,
         train_all = train_all)
 
-    # Create out custom TQDM progress bar for training.
-    if progress_off:
-        callback = progress_bars.no_progress()
-    else:
-        callback = progress_bars.train_progress(length)
-
     window = len(metadata['columns'])
-    model = create_model(window, layers, dropout)
-    history = model.fit(
-        dataset,
-        epochs = 10,
-        verbose = 0,
-        callbacks = [callback])
+    model = create_model(window, layers, dropout=dropout)
+
+    history = fit(model, vectors, labels)
 
     return model
 
@@ -459,91 +516,62 @@ def create_training_fold(vectors, labels, n_examples, train_all = False, batch_s
     vectors = vectors[index]
     labels = labels[index]
 
-    # Convert to tensorflow dataset.
-    dataset = tf.data.Dataset.from_tensor_slices((vectors, labels))
-    dataset = dataset.batch(batch_size)
-
     # Compute the number of batches.
     length = int(np.ceil(length/batch_size))
 
-    return dataset, length
+    return vectors, labels
 
 # Prepares a validation fold dataset.
-def create_validation_fold(vectors, labels, batch_size = 32):
-    # Convert to tensorflow dataset.
-    dataset = tf.data.Dataset.from_tensor_slices((vectors, labels))
-    dataset = dataset.batch(batch_size)
-
-    # Compute the number of batches.
-    length = int(np.ceil(len(vectors)/batch_size))
-
-    return dataset, length
+def create_validation_fold(vectors, labels):
+    return vectors, labels
 
 # Begin training the neural network, with optional validation data, and model saving.
-def train_network(model, training_dataset, length, progress_off, validation_split = 0.1):
-    # TODO: There doesn't seem to be a great way to get the length of a
-    # tf.DataSet, so instead we resort to passing the variable.
-    n_validation = int(length*validation_split)
+def train_network(model, vectors, labels, progress_off, validation_split = 0.1, epochs=10):
+    n_validation = int(vectors.shape[0]*validation_split)
     # Save 10% of the training to see how validation history looks.
-    validation_dataset = training_dataset.take(n_validation) 
-    training_dataset = training_dataset.skip(n_validation)
+    idx = np.random.permutation(vectors.shape[0])
+    valid_idx, train_idx = idx[:n_validation], idx[n_validation:]
 
-    # Create out custom TQDM progress bar for training.
-    if progress_off:
-        callback = progress_bars.no_progress()
-    else:
-        callback = progress_bars.train_progress(length)
+    history = fit(
+        model,
+        vectors[train_idx],
+        labels[train_idx],
+        valid_vectors=vectors[valid_idx],
+        valid_labels=labels[valid_idx],
+        epochs=epochs)
 
-    history = model.fit(
-        training_dataset,
-        validation_data = validation_dataset,
-        epochs = 10,
-        verbose = 0,
-        callbacks = [callback])
-
-    epochs = range(1, len(history.history['accuracy']) + 1)
-    training_history = {'x': epochs, 'y': history.history['accuracy'], 'area': None}
-    validation_history = {'x': epochs, 'y': history.history['val_accuracy'], 'area': None}
+    training_history = {'x': range(1, epochs + 1), 'y': history['acc'], 'area': None}
+    validation_history = {'x': range(1, epochs + 1), 'y': history['val_acc'], 'area': None}
     
     return training_history, validation_history
 
 # Predicts on a provided valiation dataset.
-def validate_network(model, dataset, length, progress_off):
-    # Create our custom TQDM progress bar for validation.
-    if progress_off:
-        callback = progress_bars.no_progress()
-    else:
-        callback = progress_bars.predict_progress(length)
-    
-    scores = model.predict(
-        dataset,
-        callbacks = [callback])
-
-    return scores.reshape(-1)
+def validate_network(model, vectors, progress_off):
+    return predict(model, vectors).reshape(-1)
 
 # Trains on a fold of the dataset.
 def train_fold(model, vectors, dataframe, n_examples, train_all, progress_off):
     labels = dataframe['label'].to_numpy()
-    dataset, length = create_training_fold(
+    vectors, labels = create_training_fold(
         vectors = vectors,
         labels = labels,
         n_examples = n_examples,
         train_all = train_all)
 
-    training_history, validation_history = train_network(model, dataset, length, progress_off)
+    training_history, validation_history = train_network(model, vectors, labels, progress_off)
 
     return training_history, validation_history
 
 # Validates on a fold of the dataset.
 def validate_fold(model, vectors, dataframe, progress_off):
     labels = dataframe['label'].to_numpy()
-    dataset, length = create_validation_fold(
+    vectors, _ = create_validation_fold(
         vectors = vectors,
         labels = labels)
 
-    scores = validate_network(model, dataset, length, progress_off)
+    scores = validate_network(model, vectors, progress_off)
 
-    return  scores
+    return scores
 
 # Performs a k-fold experiment on the dataset, where k is equal to the number of chromosomes. On each fold, this method
 # obtains metrics by training on all examples from all chromosomes except a holdout one, then obtains metrics on the one
@@ -590,7 +618,6 @@ def train_dataset(vectors, dataframe, threshold, n_examples, holdout, metadata, 
     }
 
     window = len(metadata['columns'])
-    model = create_model(window, layers, dropout)
     index = dataframe.index.get_level_values('chromosome')
     for holdout in chromosomes:
         # Training fold.
@@ -624,6 +651,7 @@ def train_dataset(vectors, dataframe, threshold, n_examples, holdout, metadata, 
         results['precision_recall'].append(pr)
         results['peak_curve'].append(peak)
 
+        model = create_model(window, layers, dropout)
         training_history, validation_history = train_fold(
             model = model,
             vectors = training_vectors,
@@ -641,7 +669,7 @@ def train_dataset(vectors, dataframe, threshold, n_examples, holdout, metadata, 
             vectors = validation_vectors,
             dataframe = validation_dataframe,
             progress_off = progress_off)
-        model.reset_states()
+        # model.reset_states()
 
         # Store metrics.
         roc, pr, peak = get_metrics(validation_dataframe, scores)
@@ -655,9 +683,7 @@ def train_dataset(vectors, dataframe, threshold, n_examples, holdout, metadata, 
             vectors = validation_vectors,
             scores = scores,
             metadata = metadata,
-            progress_off = progress_off,
-            layers = layers,
-            dropout = dropout)
+            progress_off = progress_off)
 
         # Store metrics.
         roc, pr, peak = get_metrics(validation_dataframe, scores)
@@ -670,6 +696,7 @@ def train_dataset(vectors, dataframe, threshold, n_examples, holdout, metadata, 
         training_vectors = training_vectors[condition]
         training_dataframe = training_dataframe.loc[condition]
 
+        model = create_model(window, layers, dropout)
         training_history, validation_history = train_fold(
             model = model,
             vectors = training_vectors,
@@ -687,7 +714,6 @@ def train_dataset(vectors, dataframe, threshold, n_examples, holdout, metadata, 
             vectors = validation_vectors,
             dataframe = validation_dataframe,
             progress_off = progress_off)
-        model.reset_states()
 
         # Store metrics.
         roc, pr, peak = get_metrics(validation_dataframe, scores)
@@ -786,10 +812,13 @@ def main():
     with open(arguments.metadata) as infile:
         metadata = json.load(infile)
     vectors = np.memmap(arguments.input, dtype = 'float32', mode = 'r', shape = (metadata['rows'], len(metadata['columns'])))
-    utils.end_time(start) 
+    utils.end_time(start)
+
+    print("Model architecture:")
+    print(create_model(vectors.shape[1], [300, 150, 50]))
 
     # Training model.
-    print('Training Model')
+    print("Training Model")
     start = utils.start_time()
     vectors, dataframe, results = train_dataset(
         vectors = vectors,
@@ -800,7 +829,7 @@ def main():
         metadata = metadata,
         min_peak_length = arguments.min_peak_length,
         train_all = arguments.train_all,
-        progress_off = arguments.progress_off, 
+        progress_off = arguments.progress_off,
         layers = arguments.layers,
         dropout = arguments.dropout)
     utils.end_time(start) 
@@ -823,7 +852,7 @@ def main():
     metrics = plot_metrics.plot_pdf(results, filename, arguments.description)
     if arguments.description:
         model = create_model(len(metadata['columns']), arguments.layers, arguments.dropout)
-        parameters = model.count_params()
+        parameters = len(model.parameters())
 
         date = datetime.date.today()
         time = datetime.datetime.now().time()
@@ -855,11 +884,12 @@ def main():
             metadata = metadata, 
             only_t = arguments.only_t,
             train_all = arguments.train_all,
-            progress_off = arguments.progress_off, 
+            progress_off = arguments.progress_off,
             layers = arguments.layers,
             dropout = arguments.dropout)
 
-        model.save(filename)
+        # model.save(filename)
+        torch.save(model, filename)
         utils.end_time(start)
 
     total_time = utils.end_time(total_start, True)
